@@ -7,7 +7,7 @@ open NUnit.Framework
 
 open UseData.Json.Parser
 
-module Basic =
+module BasicString =
     [<Test>]
     let ``empty string`` ()  =
         let bytes = Encoding.UTF8.GetBytes "\"\""
@@ -240,3 +240,171 @@ module Utf16 =
             let ex = Assert.Throws<ParsingException>(fun () -> parseString (ReadOnlySpan buf) 0 |> ignore)
             Assert.AreEqual(3, ex.pos)
             Assert.AreEqual(Error.InvalidUtf16, ex.error)
+
+module BasicNumber =
+    [<Test>]
+    let ``zero`` () =
+        let bytes = Encoding.UTF8.GetBytes "0"
+        let struct (raw, pos) = parseNumber (ReadOnlySpan bytes) 0
+
+        Assert.AreEqual(1, pos)
+        Assert.AreEqual({ ContentStartPos = 0; ContentEndPos = 1 }, raw)
+
+    [<Test>]
+    let ``zero with zero fractional part`` () =
+        let bytes = Encoding.UTF8.GetBytes "0.00"
+        let struct (raw, pos) = parseNumber (ReadOnlySpan bytes) 0
+
+        Assert.AreEqual(4, pos)
+        Assert.AreEqual({ ContentStartPos = 0; ContentEndPos = 4 }, raw)
+
+    [<Test>]
+    let ``zero with zero exponent`` () =
+        let bytes = Encoding.UTF8.GetBytes "0e+0000"
+        let struct (raw, pos) = parseNumber (ReadOnlySpan bytes) 0
+
+        Assert.AreEqual(7, pos)
+        Assert.AreEqual({ ContentStartPos = 0; ContentEndPos = 7 }, raw)
+
+    [<Test>]
+    let ``zero with zero fractional part and zero exponent`` () =
+        let bytes = Encoding.UTF8.GetBytes "0.000e-000"
+        let struct (raw, pos) = parseNumber (ReadOnlySpan bytes) 0
+
+        Assert.AreEqual(10, pos)
+        Assert.AreEqual({ ContentStartPos = 0; ContentEndPos = 10 }, raw)
+
+    [<Test>]
+    let ``integer with multiple digits`` () =
+        let bytes = Encoding.UTF8.GetBytes "123"
+        let struct (raw, pos) = parseNumber (ReadOnlySpan bytes) 0
+
+        Assert.AreEqual(3, pos)
+        Assert.AreEqual({ ContentStartPos = 0; ContentEndPos = 3 }, raw)
+
+
+    [<Test>]
+    let ``fractional number`` () =
+        let bytes = Encoding.UTF8.GetBytes "3.14"
+        let struct (raw, pos) = parseNumber (ReadOnlySpan bytes) 0
+
+        Assert.AreEqual(4, pos)
+        Assert.AreEqual({ ContentStartPos = 0; ContentEndPos = 4 }, raw)
+
+    [<Test>]
+    let ``exponent can have optional plus or minus sign`` () =
+        let bytes = Encoding.UTF8.GetBytes "12e1"
+        let struct (raw, pos) = parseNumber (ReadOnlySpan bytes) 0
+        Assert.AreEqual(4, pos)
+        Assert.AreEqual({ ContentStartPos = 0; ContentEndPos = 4 }, raw)
+
+        let bytes = Encoding.UTF8.GetBytes "12e+1"
+        let struct (raw, pos) = parseNumber (ReadOnlySpan bytes) 0
+        Assert.AreEqual(5, pos)
+        Assert.AreEqual({ ContentStartPos = 0; ContentEndPos = 5 }, raw)
+
+        let bytes = Encoding.UTF8.GetBytes "12e-1"
+        let struct (raw, pos) = parseNumber (ReadOnlySpan bytes) 0
+        Assert.AreEqual(5, pos)
+        Assert.AreEqual({ ContentStartPos = 0; ContentEndPos = 5 }, raw)
+
+    [<Test>]
+    let ``number in middle of span`` () =
+        let bytes = Encoding.UTF8.GetBytes "  0.2   "
+        let struct (raw, pos) = parseNumber (ReadOnlySpan bytes) 2
+        Assert.AreEqual(5, pos)
+        Assert.AreEqual({ ContentStartPos = 2; ContentEndPos = 5 }, raw)
+
+    [<Test>]
+    let ``character after number is left unparsed`` () =
+        let bytes = Encoding.UTF8.GetBytes "1foo"
+        let struct (raw, pos) = parseNumber (ReadOnlySpan bytes) 0
+        Assert.AreEqual(1, pos)
+        Assert.AreEqual({ ContentStartPos = 0; ContentEndPos = 1 }, raw)
+
+        let bytes = Encoding.UTF8.GetBytes "1.0.13"  // Suffix starting with the second dot is left unparsed.
+        let struct (raw, pos) = parseNumber (ReadOnlySpan bytes) 0
+        Assert.AreEqual(3, pos)
+        Assert.AreEqual({ ContentStartPos = 0; ContentEndPos = 3 }, raw)
+
+        let bytes = Encoding.UTF8.GetBytes "1e32e4"  // Suffix starting with the second `e` is left unparsed.
+        let struct (raw, pos) = parseNumber (ReadOnlySpan bytes) 0
+        Assert.AreEqual(4, pos)
+        Assert.AreEqual({ ContentStartPos = 0; ContentEndPos = 4 }, raw)
+
+        // Number in JSON can start only with one zero so remaining two zeros will be left unparsed.
+        let bytes = Encoding.UTF8.GetBytes "000"
+        let struct (raw, pos) = parseNumber (ReadOnlySpan bytes) 0
+        Assert.AreEqual(1, pos)
+        Assert.AreEqual({ ContentStartPos = 0; ContentEndPos = 1 }, raw)
+
+    [<Test>]
+    let ``e can be lowercase or uppercase`` () =
+        let bytes = Encoding.UTF8.GetBytes "99E1"
+        let struct (raw, pos) = parseNumber (ReadOnlySpan bytes) 0
+        Assert.AreEqual(4, pos)
+        Assert.AreEqual({ ContentStartPos = 0; ContentEndPos = 4 }, raw)
+
+        let bytes = Encoding.UTF8.GetBytes "99e1"
+        let struct (raw, pos) = parseNumber (ReadOnlySpan bytes) 0
+        Assert.AreEqual(4, pos)
+        Assert.AreEqual({ ContentStartPos = 0; ContentEndPos = 4 }, raw)
+
+    [<Test>]
+    let ``no digits after initial minus is invalid`` () =
+        let bytes = Encoding.UTF8.GetBytes "-.12"
+        let ex = Assert.Throws<ParsingException>(fun () -> parseNumber (ReadOnlySpan bytes) 0 |> ignore)
+        Assert.AreEqual(1, ex.pos)
+        Assert.AreEqual(Error.InvalidNumber, ex.error)
+
+        let bytes = Encoding.UTF8.GetBytes "-e1"
+        let ex = Assert.Throws<ParsingException>(fun () -> parseNumber (ReadOnlySpan bytes) 0 |> ignore)
+        Assert.AreEqual(1, ex.pos)
+        Assert.AreEqual(Error.InvalidNumber, ex.error)
+
+    [<Test>]
+    let ``initial plus is invalid`` () =
+        let bytes = Encoding.UTF8.GetBytes "+1"
+        let ex = Assert.Throws<ParsingException>(fun () -> parseNumber (ReadOnlySpan bytes) 0 |> ignore)
+        Assert.AreEqual(0, ex.pos)
+        Assert.AreEqual(Error.InvalidNumber, ex.error)
+
+
+    [<Test>]
+    let ``only fractional is invalid`` () =
+        let bytes = Encoding.UTF8.GetBytes ".4"
+        let ex = Assert.Throws<ParsingException>(fun () -> parseNumber (ReadOnlySpan bytes) 0 |> ignore)
+        Assert.AreEqual(0, ex.pos)
+        Assert.AreEqual(Error.InvalidNumber, ex.error)
+
+    [<Test>]
+    let ``only exponent is invalid`` () =
+        let bytes = Encoding.UTF8.GetBytes "e1"
+        let ex = Assert.Throws<ParsingException>(fun () -> parseNumber (ReadOnlySpan bytes) 0 |> ignore)
+        Assert.AreEqual(0, ex.pos)
+        Assert.AreEqual(Error.InvalidNumber, ex.error)
+
+    [<Test>]
+    let ``long integer`` () =
+        let sb = StringBuilder()
+        for i in 1 .. 600_000 do
+            let digit = char ((i % 10) + int '0')
+            sb.Append(digit) |> ignore
+        let bytes = Encoding.UTF8.GetBytes(sb.ToString())
+        let struct (raw, pos) = parseNumber (ReadOnlySpan bytes) 0
+        Assert.AreEqual(600_000, pos)
+        Assert.AreEqual({ ContentStartPos = 0; ContentEndPos = 600_000 }, raw)
+
+    [<Test>]
+    let ``huge exponent`` () =
+        let bytes = Encoding.UTF8.GetBytes "632e2384932870437589483474385978943"
+        let struct (raw, pos) = parseNumber (ReadOnlySpan bytes) 0
+        Assert.AreEqual(35, pos)
+        Assert.AreEqual({ ContentStartPos = 0; ContentEndPos = 35 }, raw)
+
+    [<Test>]
+    let ``long fractional part`` () =
+        let bytes = Encoding.UTF8.GetBytes "37.00343412334432439088978998789483474385978943"
+        let struct (raw, pos) = parseNumber (ReadOnlySpan bytes) 0
+        Assert.AreEqual(47, pos)
+        Assert.AreEqual({ ContentStartPos = 0; ContentEndPos = 47 }, raw)

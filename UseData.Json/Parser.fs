@@ -11,6 +11,7 @@ type Error =
     | InvalidEscapeSequence
     | InvalidHexDigit
     | UnexpectedControlCharacter
+    | InvalidNumber
 
 exception ParsingException of pos:int * error:Error * info:string
     with
@@ -192,3 +193,71 @@ let inline parseString (span : ReadOnlySpan<byte>) (pos : int) : struct (RawStri
         raiseParsingException pos Error.UnexpectedEndOfSpan "Closing double quote is missing"
 
     struct ({ ContentStartPos = startPos; ContentEndPos = pos - 1; StringLength = stringLength }, pos)
+
+[<Struct>]
+type RawNumber = { ContentStartPos : int
+                   ContentEndPos : int }
+
+let inline skipDigits (span : ReadOnlySpan<byte>) (pos : int) : int =
+    let mutable pos = pos
+
+    let mutable stop = false
+    while pos < span.Length && not stop do
+        match span[pos] with
+        | '0'B | '1'B | '2'B | '3'B | '4'B | '5'B | '6'B | '7'B | '8'B | '9'B -> pos <- pos + 1  // Skip digit.
+        | _ -> stop <- true
+
+    pos
+
+let inline skipAtLeastOneDigit (span : ReadOnlySpan<byte>) (startPos : int) =
+    let pos = skipDigits span startPos
+    if pos = startPos
+    then
+        if pos >= span.Length
+        then raiseParsingException pos Error.UnexpectedEndOfSpan "Digit expected"
+        else raiseParsingException pos Error.InvalidNumber "Digit expected"
+    else pos
+
+let inline skipExponent (span : ReadOnlySpan<byte>) (pos : int) =
+    if pos < span.Length then
+        match span[pos] with
+        | 'E'B | 'e'B ->
+            let mutable pos = pos + 1
+            if pos >= span.Length then
+                raiseParsingException pos Error.UnexpectedEndOfSpan "Exponent must have at least one digit"
+            match span[pos] with
+            | '-'B | '+'B -> pos <- pos + 1
+            | _ -> ()
+            skipAtLeastOneDigit span pos
+        | _ -> pos
+    else pos
+
+let inline skipFraction (span : ReadOnlySpan<byte>) (pos : int) =
+    if pos < span.Length then
+        match span[pos] with
+        | '.'B -> skipAtLeastOneDigit span (pos + 1)
+        | _ -> pos
+    else pos
+
+/// The first byte at `span[pos]` must be either `-` or digit.
+let inline parseNumber (span : ReadOnlySpan<byte>) (pos : int) : struct (RawNumber * int) =
+    let startPos = pos
+
+    // Skip optional `-`.
+    let mutable pos = pos
+    match span[pos] with
+    | '-'B ->
+        pos <- pos + 1
+        if pos >= span.Length then
+            raiseParsingException pos Error.UnexpectedEndOfSpan "Number must have at least one digit after sign"
+    | _ -> ()
+
+    match span[pos] with
+    | '0'B -> pos <- pos + 1  // After initial `zero` there can be only fractional part or exponent.
+    | '1'B | '2'B | '3'B | '4'B | '5'B | '6'B | '7'B | '8'B | '9'B -> pos <- skipDigits span pos
+    | _ -> raiseParsingException pos Error.InvalidNumber "Number must start with minus sign or digit"
+
+    pos <- skipFraction span pos
+    pos <- skipExponent span pos
+
+    struct ({ ContentStartPos = startPos; ContentEndPos = pos }, pos)
