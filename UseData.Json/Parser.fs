@@ -1,6 +1,7 @@
 module UseData.Json.Parser
 
 open System
+open System.Text
 
 [<RequireQualifiedAccess>]
 type Error =
@@ -141,7 +142,7 @@ let inline parseString (span : ReadOnlySpan<byte>) (pos : int) : struct (RawStri
             pos <- pos + 1
             stringLength <- stringLength + 1
         // Code point which consists of 3 bytes.
-        // It has 4 + 6 + 6 = 16 bits
+        // It has 4 + 6 + 6 = 16 bits.
         | b when b &&& 0b1111_0000uy = 0b1110_0000uy ->
             if pos + 2 >= span.Length then
                 raiseParsingException pos Error.UnexpectedEndOfSpan "Unfinished code point of size 3"
@@ -166,7 +167,7 @@ let inline parseString (span : ReadOnlySpan<byte>) (pos : int) : struct (RawStri
             pos <- pos + 1
             stringLength <- stringLength + 1
         // Code point which consists of 4 bytes.
-        // It has 3 + 6 + 6 + 6 = 21 bits
+        // It has 3 + 6 + 6 + 6 = 21 bits.
         | b when b &&& 0b1111_1000uy = 0b1111_0000uy ->
             if pos + 3 >= span.Length then
                 raiseParsingException pos Error.UnexpectedEndOfSpan "Unfinished code point of size 3"
@@ -193,6 +194,84 @@ let inline parseString (span : ReadOnlySpan<byte>) (pos : int) : struct (RawStri
         raiseParsingException pos Error.UnexpectedEndOfSpan "Closing double quote is missing"
 
     struct ({ ContentStartPos = startPos; ContentEndPos = pos - 1; StringLength = stringLength }, pos)
+
+/// Assumes that JSON string is valid. 
+let decodeUtf16 (span : ReadOnlySpan<byte>) (rawString : RawString) : string =
+    if rawString.StringLength = 0
+    then String.Empty
+    else
+        let sb = StringBuilder(rawString.StringLength, rawString.StringLength)
+        let mutable pos = rawString.ContentStartPos
+        while pos < rawString.ContentEndPos do
+            match span[pos] with
+            | '\\'B ->
+                pos <- pos + 1  // Processed `\`.
+                match span[pos] with
+                | '"'B | '\\'B | '/'B ->
+                    sb.Append(char span[pos]) |> ignore
+                    pos <- pos + 1  // Processed `\"` or `\\` or `\/`.
+                | 'b'B ->
+                    sb.Append('\b') |> ignore
+                    pos <- pos + 1  // Processed `\b`.
+                | 'f'B ->
+                    sb.Append('\f') |> ignore
+                    pos <- pos + 1  // Processed `\f`.
+                | 'n'B ->
+                    sb.Append('\n') |> ignore
+                    pos <- pos + 1  // Processed `\n`.
+                | 'r'B ->
+                    sb.Append('\r') |> ignore
+                    pos <- pos + 1  // Processed `\r`.
+                | 't'B ->
+                    sb.Append('\t') |> ignore
+                    pos <- pos + 1  // Processed `\t`.
+                | 'u'B ->
+                    pos <- pos + 1  // Processed `\u`.
+                    let codeUnit = readUtf16CodeUnitInHex span pos
+                    sb.Append(char codeUnit) |> ignore
+                    pos <- pos + 4
+                | _ -> failwith "Not valid JSON string: Backslash followed by unexpected character"
+
+            // Code point which consists of 1 byte.
+            // It has 7 bits.
+            | b when b &&& 0b1000_0000uy = 0uy ->
+                sb.Append(char b) |> ignore
+                pos <- pos + 1
+            // Code point which consists of 2 bytes.
+            // It has 5 + 6 = 11 bits.
+            | b when b &&& 0b1110_0000uy = 0b1100_0000uy ->
+                let b2 = span[pos + 1]
+                let mutable codePoint = int b &&& 0b0001_1111
+                codePoint <- (codePoint <<< 6) ||| (int b2 &&& 0b0011_1111)
+                sb.Append(char codePoint) |> ignore
+                pos <- pos + 2
+            // Code point which consists of 3 bytes.
+            // It has 4 + 6 + 6 = 16 bits.
+            | b when b &&& 0b1111_0000uy = 0b1110_0000uy ->
+                let b2 = span[pos + 1]
+                let b3 = span[pos + 2]
+                let mutable codePoint = int b &&& 0b0000_1111
+                codePoint <- (codePoint <<< 6) ||| (int b2 &&& 0b0011_1111)
+                codePoint <- (codePoint <<< 6) ||| (int b3 &&& 0b0011_1111)
+                sb.Append(char codePoint) |> ignore
+                pos <- pos + 3
+            // Code point which consists of 4 bytes.
+            // It has 3 + 6 + 6 + 6 = 21 bits.
+            | b when b &&& 0b1111_1000uy = 0b1111_0000uy ->
+                let b2 = span[pos + 1]
+                let b3 = span[pos + 2]
+                let b4 = span[pos + 3]
+                let mutable codePoint = int b &&& 0b0000_1111
+                codePoint <- (codePoint <<< 6) ||| (int b2 &&& 0b0011_1111)
+                codePoint <- (codePoint <<< 6) ||| (int b3 &&& 0b0011_1111)
+                codePoint <- (codePoint <<< 6) ||| (int b4 &&& 0b0011_1111)
+                // We know that `codePoint` cannot be encoded in 16 bits so it must be at least `0x10000`. 
+                let x = codePoint - 0x10000
+                0xD800 + (x >>> 10) |> char |> sb.Append |> ignore  // Higher 10 bits of `x`.
+                0xDC00 + (x &&& 0x3FF) |> char |> sb.Append |> ignore  // Lower 10 bits of `x`.
+                pos <- pos + 4
+            | _ -> failwith "Not valid JSON string: Unexpected start of code point"        
+        sb.ToString()
 
 [<Struct>]
 type RawNumber = { ContentStartPos : int

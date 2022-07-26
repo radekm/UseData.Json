@@ -11,34 +11,42 @@ module BasicString =
     [<Test>]
     let ``empty string`` ()  =
         let bytes = Encoding.UTF8.GetBytes "\"\""
-        let struct (raw, pos) = parseString (ReadOnlySpan bytes) 0
+        let span = ReadOnlySpan bytes
+        let struct (raw, pos) = parseString span 0
 
         Assert.AreEqual(2, pos)
         Assert.AreEqual({ ContentStartPos = 1; ContentEndPos = 1; StringLength = 0 }, raw)
+        Assert.AreEqual("", decodeUtf16 span raw)
 
     [<Test>]
     let ``ordinary word`` ()  =
         let bytes = Encoding.UTF8.GetBytes "\"Hello world!\""
-        let struct (raw, pos) = parseString (ReadOnlySpan bytes) 0
+        let span = ReadOnlySpan bytes
+        let struct (raw, pos) = parseString span 0
 
         Assert.AreEqual(14, pos)
         Assert.AreEqual({ ContentStartPos = 1; ContentEndPos = 13; StringLength = 12 }, raw)
+        Assert.AreEqual("Hello world!", decodeUtf16 span raw)
 
     [<Test>]
     let ``escape sequences`` ()  =
         let bytes = Encoding.UTF8.GetBytes "\"\\\\\\\"\\n\\r\\u0041\""
-        let struct (raw, pos) = parseString (ReadOnlySpan bytes) 0
+        let span = ReadOnlySpan bytes
+        let struct (raw, pos) = parseString span 0
 
         Assert.AreEqual(16, pos)
         Assert.AreEqual({ ContentStartPos = 1; ContentEndPos = 15; StringLength = 5 }, raw)
+        Assert.AreEqual("\\\"\n\rA", decodeUtf16 span raw)
 
     [<Test>]
     let ``initial pos greater than 0`` ()  =
         let bytes = Encoding.UTF8.GetBytes "\"bar\" \"foo\""
-        let struct (raw, pos) = parseString (ReadOnlySpan bytes) 6
+        let span = ReadOnlySpan bytes
+        let struct (raw, pos) = parseString span 6
 
         Assert.AreEqual(11, pos)
         Assert.AreEqual({ ContentStartPos = 7; ContentEndPos = 10; StringLength = 3 }, raw)
+        Assert.AreEqual("foo", decodeUtf16 span raw)
 
     [<Test>]
     let ``string without quote at the end`` ()  =
@@ -59,11 +67,13 @@ module Utf8 =
                 let rune = Rune(codePoint)
                 let byteLength = rune.EncodeToUtf8(Span(buf, 1, 4))
                 buf[byteLength + 1] <- '"'B
-                let struct (raw, pos) = parseString (ReadOnlySpan buf) 0
+                let span = ReadOnlySpan buf
+                let struct (raw, pos) = parseString span 0
                 Assert.AreEqual(byteLength + 2, pos)
                 Assert.AreEqual(
                     { ContentStartPos = 1; ContentEndPos = byteLength + 1; StringLength = rune.Utf16SequenceLength },
                     raw)
+                Assert.AreEqual(string rune, decodeUtf16 span raw)
 
     [<Test>]
     let ``control characters must not be present in strings`` () =
@@ -156,11 +166,13 @@ module Utf16 =
     [<Test>]
     let ``hex digits in unicode escape sequences can be lowercase and uppercase`` () =
         let bytes = Encoding.UTF8.GetBytes "\"\\uABcd\\ueFAa\""
-        let struct (raw, pos) = parseString (ReadOnlySpan bytes) 0
+        let span = ReadOnlySpan bytes
+        let struct (raw, pos) = parseString span 0
 
         Assert.AreEqual(14, pos)
         Assert.AreEqual(
             { ContentStartPos = 1; ContentEndPos = 13; StringLength = 2 }, raw)
+        Assert.AreEqual("ꯍ", decodeUtf16 span raw)
 
     // Create unicode escape sequence `\uXXXX` for char `c`.
     let charToEscapeSequence (c : char) = sprintf "\\u%s" ((int c).ToString "X4")
@@ -171,17 +183,20 @@ module Utf16 =
         for codePoint in 0 .. 1_114_111 do
             // Skip code points for surrogates.
             if codePoint < 0xD800 || 0xDFFF < codePoint then
-                let charLength = Rune(codePoint).EncodeToUtf16(Span charBuf)
+                let rune = Rune(codePoint)
+                let charLength = rune.EncodeToUtf16(Span charBuf)
                 let contentStr =
                     if charLength = 1
                     then charToEscapeSequence charBuf[0]
                     else charToEscapeSequence charBuf[0] + charToEscapeSequence charBuf[1]
                 let buf = Encoding.UTF8.GetBytes(sprintf "\"%s\"" contentStr)
-                let struct (raw, pos) = parseString (ReadOnlySpan buf) 0
+                let span = ReadOnlySpan buf
+                let struct (raw, pos) = parseString span 0
 
                 Assert.AreEqual(charLength * 6 + 2, pos)
                 Assert.AreEqual(
                     { ContentStartPos = 1; ContentEndPos = charLength * 6 + 2 - 1; StringLength = charLength }, raw)
+                Assert.AreEqual(string rune, decodeUtf16 span raw)
 
     [<Test>]
     let ``incomplete surrogates are rejected`` () =
