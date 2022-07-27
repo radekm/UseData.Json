@@ -1,6 +1,7 @@
 module UseData.Json.Parser
 
 open System
+open System.Collections.Generic
 open System.Text
 
 [<RequireQualifiedAccess>]
@@ -13,6 +14,11 @@ type Error =
     | InvalidHexDigit
     | UnexpectedControlCharacter
     | InvalidNumber
+    | TooDeepNesting
+    | DuplicateField
+    | InvalidObject
+    | InvalidArray
+    | InvalidValue
 
 exception ParsingException of pos:int * error:Error * info:string
     with
@@ -195,7 +201,7 @@ let inline parseString (span : ReadOnlySpan<byte>) (pos : int) : struct (RawStri
 
     struct ({ ContentStartPos = startPos; ContentEndPos = pos - 1; StringLength = stringLength }, pos)
 
-/// Assumes that JSON string is valid. 
+/// Assumes that JSON string is valid.
 let decodeUtf16 (span : ReadOnlySpan<byte>) (rawString : RawString) : string =
     if rawString.StringLength = 0
     then String.Empty
@@ -265,12 +271,12 @@ let decodeUtf16 (span : ReadOnlySpan<byte>) (rawString : RawString) : string =
                 codePoint <- (codePoint <<< 6) ||| (int b2 &&& 0b0011_1111)
                 codePoint <- (codePoint <<< 6) ||| (int b3 &&& 0b0011_1111)
                 codePoint <- (codePoint <<< 6) ||| (int b4 &&& 0b0011_1111)
-                // We know that `codePoint` cannot be encoded in 16 bits so it must be at least `0x10000`. 
+                // We know that `codePoint` cannot be encoded in 16 bits so it must be at least `0x10000`.
                 let x = codePoint - 0x10000
                 0xD800 + (x >>> 10) |> char |> sb.Append |> ignore  // Higher 10 bits of `x`.
                 0xDC00 + (x &&& 0x3FF) |> char |> sb.Append |> ignore  // Lower 10 bits of `x`.
                 pos <- pos + 4
-            | _ -> failwith "Not valid JSON string: Unexpected start of code point"        
+            | _ -> failwith "Not valid JSON string: Unexpected start of code point"
         sb.ToString()
 
 [<Struct>]
@@ -340,3 +346,184 @@ let inline parseNumber (span : ReadOnlySpan<byte>) (pos : int) : struct (RawNumb
     pos <- skipExponent span pos
 
     struct ({ ContentStartPos = startPos; ContentEndPos = pos }, pos)
+
+type FieldId = int
+
+[<CustomEquality>]
+[<NoComparison>]
+type RawValue =
+    | Object of IDictionary<FieldId, RawValue>
+    | Array of RawValue[]
+    | RawString of RawString
+    | RawNumber of RawNumber
+    | True
+    | False
+    | Null
+    with
+        override me.Equals(o : obj) =
+            match o with
+            | :? RawValue as o ->
+                match me, o with
+                | Object fields, Object fields2 ->
+                    fields.Count = fields2.Count &&
+                    fields
+                    |> Seq.forall (fun kv ->
+                        let present, value2 = fields2.TryGetValue kv.Key
+                        present && kv.Value = value2)
+                | Array items, Array items2 -> items.Length = items2.Length && Array.forall2 (=) items items2
+                | RawString str, RawString str2 -> str = str2
+                | RawNumber num, RawNumber num2 -> num = num2
+                | True, True | False, False | Null, Null -> true
+                | _ -> false
+            | _ -> false
+
+        override me.GetHashCode() =
+            match me with
+            | Object fields -> fields.Count  // This is fast but not very good.
+            | Array items -> items.Length  // This is fast but not very good.
+            | RawString str -> str.GetHashCode()
+            | RawNumber num -> num.GetHashCode()
+            | True -> -1
+            | False -> -2
+            | Null -> -3
+
+/// Returns position of the first first non-whitespace byte or after the last byte of span.
+let inline skipWhitespace (span : ReadOnlySpan<byte>) (pos : int) : int =
+    let mutable pos = pos
+
+    let mutable stop = false
+    while pos < span.Length && not stop do
+        match span[pos] with
+        | '\t'B | '\n'B | '\r'B | ' 'B -> pos <- pos + 1  // Skip whitespace.
+        | _ -> stop <- true
+
+    pos
+
+/// Same as `skipWhitespace` but additionally ensures that returned position is still inside span.
+let inline skipWhitespaceAndEnsureNotEndOfSpan (span : ReadOnlySpan<byte>) (pos : int) (msg : string) =
+    let pos = skipWhitespace span pos
+    if pos >= span.Length then
+        raiseParsingException pos Error.UnexpectedEndOfSpan msg
+    pos
+
+/// The first byte at `span[pos]` must be quote. But it's not checked.
+let rec inline parseField
+    (intern : string -> FieldId)
+    (span : ReadOnlySpan<byte>)
+    (pos : int)
+    (maxNesting : int) : struct (FieldId * RawValue * int) =
+
+    let struct (rawField, pos) = parseString span pos
+    let field = decodeUtf16 span rawField |> intern
+    let pos = skipWhitespaceAndEnsureNotEndOfSpan span pos "Expecting colon"
+    if span[pos] <> ':'B then
+        raiseParsingException pos Error.InvalidObject "Expecting colon"
+    let struct (rawValue, pos) = parseRawValue intern span (pos + 1) maxNesting
+    struct (field, rawValue, pos)
+
+/// The first byte at `span[pos]` must be opening brace. But it's not checked.
+and inline parseObject
+    (intern : string -> FieldId)
+    (span : ReadOnlySpan<byte>)
+    (pos : int)
+    (maxNesting : int) : struct (RawValue * int) =
+
+    let fields = Dictionary()
+
+    let pos = skipWhitespaceAndEnsureNotEndOfSpan span (pos + 1) "Expecting first field or object end"
+    match span[pos] with
+    | '}'B -> struct (Object fields, pos + 1)
+    | '"'B ->
+        let struct (field, rawValue, pos) = parseField intern span pos maxNesting
+        fields[field] <- rawValue
+        let mutable nextFieldPos = skipWhitespaceAndEnsureNotEndOfSpan span pos "Expecting comma or object end"
+
+        while span[nextFieldPos] = ','B do
+            let pos = skipWhitespaceAndEnsureNotEndOfSpan span (nextFieldPos + 1) "Expecting field"
+
+            if span[pos] <> '"'B then
+                raiseParsingException pos Error.InvalidObject "Expecting field"
+            let struct (field, rawValue, pos) = parseField intern span pos maxNesting
+
+            let n = fields.Count
+            fields[field] <- rawValue
+            if fields.Count = n then
+                raiseParsingException pos Error.DuplicateField "Field names consist of same code points"
+
+            nextFieldPos <- skipWhitespaceAndEnsureNotEndOfSpan span pos "Expecting comma or object end"
+
+        if span[nextFieldPos] <> '}'B then
+            raiseParsingException nextFieldPos Error.InvalidObject "Expecting object end"
+
+        struct (Object fields, nextFieldPos + 1)
+    | _ -> raiseParsingException pos Error.InvalidObject "Expecting first field or object end"
+
+/// The first byte at `span[pos]` must be opening bracket. But it's not checked.
+and inline parseArray
+    (intern : string -> FieldId)
+    (span : ReadOnlySpan<byte>)
+    (pos : int)
+    (maxNesting : int) : struct (RawValue * int) =
+
+    let pos = skipWhitespaceAndEnsureNotEndOfSpan span (pos + 1) "Expecting value or array end"
+    match span[pos] with
+    | ']'B -> struct (Array [||], pos + 1)
+    | _ ->
+        let items = ResizeArray()
+
+        let struct (rawValue, pos) = parseRawValue intern span pos maxNesting
+        items.Add(rawValue)
+        let mutable nextItemPos = skipWhitespaceAndEnsureNotEndOfSpan span pos "Expecting comma or array end"
+
+        while span[nextItemPos] = ','B do
+            let pos = skipWhitespaceAndEnsureNotEndOfSpan span (nextItemPos + 1) "Expecting value"
+
+            let struct (rawValue, pos) = parseRawValue intern span pos maxNesting
+            items.Add(rawValue)
+
+            nextItemPos <- skipWhitespaceAndEnsureNotEndOfSpan span pos "Expecting comma or array end"
+
+        if span[nextItemPos] <> ']'B then
+            raiseParsingException nextItemPos Error.InvalidArray "Expecting array end"
+
+        struct (Array (items.ToArray()), nextItemPos + 1)
+
+and parseRawValue
+    (intern : string -> FieldId)
+    (span : ReadOnlySpan<byte>)
+    (pos : int)
+    (maxNesting : int) : struct (RawValue * int) =
+
+    if maxNesting <= 0 then
+        raiseParsingException pos Error.TooDeepNesting "Too many nested objects or arrays"
+
+    let pos = skipWhitespaceAndEnsureNotEndOfSpan span pos "Expected JSON value"
+
+    match span[pos] with
+    | '{'B -> parseObject intern span pos (maxNesting - 1)
+    | '['B -> parseArray intern span pos (maxNesting - 1)
+    | '"'B ->
+        let struct (raw, pos) = parseString span pos
+        struct (RawString raw, pos)
+    | '0'B | '1'B | '2'B | '3'B | '4'B | '5'B | '6'B | '7'B | '8'B | '9'B | '-'B ->
+        let struct (raw, pos) = parseNumber span pos
+        struct (RawNumber raw, pos)
+    | 't'B ->
+        if pos + 3 >= span.Length then
+            raiseParsingException pos Error.UnexpectedEndOfSpan "Expecting true"
+        if span[pos + 1] <> 'r'B || span[pos + 2] <> 'u'B || span[pos + 3] <> 'e'B then
+            raiseParsingException pos Error.InvalidValue "Expecting true but got something different"
+        struct (True, pos + 4)
+    | 'f'B ->
+        if pos + 4 >= span.Length then
+            raiseParsingException pos Error.UnexpectedEndOfSpan "Expecting false"
+        if span[pos + 1] <> 'a'B || span[pos + 2] <> 'l'B || span[pos + 3] <> 's'B || span[pos + 4] <> 'e'B then
+            raiseParsingException pos Error.InvalidValue "Expecting false but got something different"
+        struct (False, pos + 5)
+    | 'n'B ->
+        if pos + 3 >= span.Length then
+            raiseParsingException pos Error.UnexpectedEndOfSpan "Expecting null"
+        if span[pos + 1] <> 'u'B || span[pos + 2] <> 'l'B || span[pos + 3] <> 'l'B then
+            raiseParsingException pos Error.InvalidValue "Expecting null but got something different"
+        struct (Null, pos + 4)
+    | _ -> raiseParsingException pos Error.InvalidValue "Unexpected first byte of value"
