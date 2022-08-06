@@ -279,6 +279,89 @@ let decodeUtf16 (span : ReadOnlySpan<byte>) (rawString : RawString) : string =
             | _ -> failwith "Not valid JSON string: Unexpected start of code point"
         sb.ToString()
 
+/// Assumes that JSON string is valid.
+let decodeUtf8InPlace (span : Span<byte>) (rawString : RawString) : int =
+    let mutable readPos = rawString.ContentStartPos
+    let mutable writePos = rawString.ContentStartPos
+    while readPos < rawString.ContentEndPos do
+        match span[readPos] with
+        | '\\'B ->
+            readPos <- readPos + 1  // Processed `\`.
+            match span[readPos] with
+            | '"'B | '\\'B | '/'B ->
+                span[writePos] <- span[readPos]
+                readPos <- readPos + 1  // Processed `\"` or `\\` or `\/`.
+                writePos <- writePos + 1
+            | 'b'B ->
+                span[writePos] <- '\b'B
+                readPos <- readPos + 1  // Processed `\b`.
+                writePos <- writePos + 1
+            | 'f'B ->
+                span[writePos] <- '\f'B
+                readPos <- readPos + 1  // Processed `\f`.
+                writePos <- writePos + 1
+            | 'n'B ->
+                span[writePos] <- '\n'B
+                readPos <- readPos + 1  // Processed `\n`.
+                writePos <- writePos + 1
+            | 'r'B ->
+                span[writePos] <- '\r'B
+                readPos <- readPos + 1  // Processed `\r`.
+                writePos <- writePos + 1
+            | 't'B ->
+                span[writePos] <- '\t'B
+                readPos <- readPos + 1  // Processed `\t`.
+                writePos <- writePos + 1
+            | 'u'B ->
+                readPos <- readPos + 1  // Processed `\u`.
+                let codeUnit = readUtf16CodeUnitInHex (Span.op_Implicit span) readPos
+                readPos <- readPos + 4  // Processed `\uXXXX`.
+
+                // Surrogate pairs are in range from D800 to DFFF.
+                // So if `codeUnit` doesn't start with bits 11011
+                // then it's not a surrogate pair and it will be ransformed into 1 or 2 or 3 UTF-8 bytes.
+                if codeUnit &&& 0b1111_1000_0000_0000 <> 0b1101_1000_0000_0000 then
+                    let codePoint = codeUnit
+                    // Code point needs 0-7 bits.
+                    if codePoint <= 0x007F then
+                        span[writePos] <- byte codePoint
+                        writePos <- writePos + 1
+                    // Code point needs 8-11 bits.
+                    elif codePoint <= 0x07FF then
+                        span[writePos] <- byte (0b1100_0000 ||| (codePoint >>> 6))
+                        span[writePos + 1] <- byte (0b1000_0000 ||| (codePoint &&& 0b0011_1111))
+                        writePos <- writePos + 2
+                    // Code point needs 12-16 bits.
+                    else
+                        span[writePos] <- byte (0b1110_0000 ||| (codePoint >>> 12))
+                        span[writePos + 1] <- byte (0b1000_0000 ||| ((codePoint >>> 6) &&& 0b0011_1111))
+                        span[writePos + 2] <- byte (0b1000_0000 ||| (codePoint &&& 0b0011_1111))
+                        writePos <- writePos + 3
+                // Surrogate pair will be transformed into 4 UTF-8 bytes.
+                else
+                    let highSurrogate = codeUnit
+                    // We know that another `\uXXXX` follows.
+                    readPos <- readPos + 2  // Skip `\u`.
+                    let lowSurrogate = readUtf16CodeUnitInHex (Span.op_Implicit span) readPos
+                    readPos <- readPos + 4
+
+                    // Concatenate lower 10 bits from each surrogate and add 0x10000.
+                    // Resulting code point needs 17-21 bits.
+                    let codePoint = (((highSurrogate &&& 0x3FF) <<< 10) ||| (lowSurrogate &&& 0x3FF)) + 0x10000
+
+                    span[writePos] <- byte (0b1111_0000 ||| (codePoint >>> 18))
+                    span[writePos + 1] <- byte (0b1000_0000 ||| ((codePoint >>> 12) &&& 0b0011_1111))
+                    span[writePos + 2] <- byte (0b1000_0000 ||| ((codePoint >>> 6) &&& 0b0011_1111))
+                    span[writePos + 3] <- byte (0b1000_0000 ||| (codePoint &&& 0b0011_1111))
+                    writePos <- writePos + 4
+            | _ -> failwith "Not valid JSON string: Backslash followed by unexpected character"
+        // Copy UTF-8 byte to output.
+        | b ->
+            span[writePos] <- b
+            readPos <- readPos + 1
+            writePos <- writePos + 1
+    writePos - rawString.ContentStartPos
+
 [<Struct>]
 type RawNumber = { ContentStartPos : int
                    ContentEndPos : int }

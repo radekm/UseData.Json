@@ -19,6 +19,10 @@ module BasicString =
         Assert.AreEqual({ ContentStartPos = 1; ContentEndPos = 1; StringLength = 0 }, raw)
         Assert.AreEqual("", decodeUtf16 span raw)
 
+        let bytes' = Array.copy bytes
+        Assert.AreEqual(0, decodeUtf8InPlace (Span bytes') raw)
+        CollectionAssert.AreEqual(bytes, bytes')
+
     [<Test>]
     let ``ordinary word`` ()  =
         let bytes = Encoding.UTF8.GetBytes "\"Hello world!\""
@@ -28,6 +32,10 @@ module BasicString =
         Assert.AreEqual(14, pos)
         Assert.AreEqual({ ContentStartPos = 1; ContentEndPos = 13; StringLength = 12 }, raw)
         Assert.AreEqual("Hello world!", decodeUtf16 span raw)
+
+        let bytes' = Array.copy bytes
+        Assert.AreEqual(12, decodeUtf8InPlace (Span bytes') raw)
+        CollectionAssert.AreEqual(bytes, bytes')
 
     [<Test>]
     let ``escape sequences`` ()  =
@@ -39,6 +47,16 @@ module BasicString =
         Assert.AreEqual({ ContentStartPos = 1; ContentEndPos = 15; StringLength = 5 }, raw)
         Assert.AreEqual("\\\"\n\rA", decodeUtf16 span raw)
 
+        let bytes' = Array.copy bytes
+        Assert.AreEqual(5, decodeUtf8InPlace (Span bytes') raw)
+        CollectionAssert.AreEqual(
+            [| '"'B
+               '\\'B; '"'B; '\n'B; '\r'B; 'A'B  // UTF-8 bytes.
+               'n'B; '\\'B; 'r'B; '\\'B; 'u'B; '0'B; '0'B; '4'B; '1'B  // Remaining part of JSON string.
+               '"'B
+            |],
+            bytes')
+
     [<Test>]
     let ``initial pos greater than 0`` ()  =
         let bytes = Encoding.UTF8.GetBytes "\"bar\" \"foo\""
@@ -48,6 +66,10 @@ module BasicString =
         Assert.AreEqual(11, pos)
         Assert.AreEqual({ ContentStartPos = 7; ContentEndPos = 10; StringLength = 3 }, raw)
         Assert.AreEqual("foo", decodeUtf16 span raw)
+
+        let bytes' = Array.copy bytes
+        Assert.AreEqual(3, decodeUtf8InPlace (Span bytes') raw)
+        CollectionAssert.AreEqual(bytes, bytes')
 
     [<Test>]
     let ``string without quote at the end`` ()  =
@@ -75,6 +97,10 @@ module Utf8 =
                     { ContentStartPos = 1; ContentEndPos = byteLength + 1; StringLength = rune.Utf16SequenceLength },
                     raw)
                 Assert.AreEqual(string rune, decodeUtf16 span raw)
+
+                let buf' = Array.copy buf
+                Assert.AreEqual(byteLength, decodeUtf8InPlace (Span buf') raw)
+                CollectionAssert.AreEqual(buf, buf')
 
     [<Test>]
     let ``control characters must not be present in strings`` () =
@@ -175,6 +201,17 @@ module Utf16 =
             { ContentStartPos = 1; ContentEndPos = 13; StringLength = 2 }, raw)
         Assert.AreEqual("ꯍ", decodeUtf16 span raw)
 
+        let bytes' = Array.copy bytes
+        Assert.AreEqual(6, decodeUtf8InPlace (Span bytes') raw)
+        CollectionAssert.AreEqual(
+            [| '"'B
+               0xEAuy; 0xAFuy; 0x8Duy;  // 3 bytes UTF-8 bytes for `\uABCD`.
+               0xEEuy; 0xBEuy; 0xAAuy;  // 3 bytes UTF-8 bytes for `\uEFAA`.
+               '\\'B; 'u'B; 'e'B; 'F'B; 'A'B; 'a'B  // Remaining part of JSON string.
+               '"'B
+            |],
+            bytes')
+
     // Create unicode escape sequence `\uXXXX` for char `c`.
     let charToEscapeSequence (c : char) = sprintf "\\u%s" ((int c).ToString "X4")
 
@@ -198,6 +235,13 @@ module Utf16 =
                 Assert.AreEqual(
                     { ContentStartPos = 1; ContentEndPos = charLength * 6 + 2 - 1; StringLength = charLength }, raw)
                 Assert.AreEqual(string rune, decodeUtf16 span raw)
+
+                let buf' = Array.copy buf
+                let expectedLength, expectedBuf' =
+                    let b = Array.copy buf
+                    rune.EncodeToUtf8(Span(b).Slice(1)), b
+                Assert.AreEqual(expectedLength, decodeUtf8InPlace (Span buf') raw)
+                CollectionAssert.AreEqual(expectedBuf', buf')
 
     [<Test>]
     let ``incomplete surrogates are rejected`` () =

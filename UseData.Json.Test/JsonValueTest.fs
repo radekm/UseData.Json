@@ -76,6 +76,21 @@ let ``parse array of decimals`` () =
         res)
 
 [<Test>]
+let ``decode UTF-8 in place`` () =
+    let fields = Dictionary()
+    let intern = intern fields
+
+    let json = Encoding.UTF8.GetBytes " \"\\uABCD\\n😈\" "
+    let struct (res, pos) =
+        JsonValue.parseUtf8String intern failTestOnUnusedFieldTracer (Memory json) maxNesting (fun v ->
+            v |> Json.utf8StringDecodedInPlace)
+
+    Assert.AreEqual(15, pos)
+    CollectionAssert.AreEqual(
+        [| 0xEAuy; 0xAFuy; 0x8Duy; '\n'B; 0xF0uy; 0x9Fuy; 0x98uy; 0x88uy |],
+        res.ToArray())
+
+[<Test>]
 let ``unused fields are reported`` () =
     let fields = Dictionary()
     let intern = intern fields

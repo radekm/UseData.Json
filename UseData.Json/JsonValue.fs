@@ -163,8 +163,15 @@ module Json =
             decodeUtf16 (Span.op_Implicit v.Buffer.Span) raw
         | _ -> raiseJsonParsingException v Error.UnexpectedKind "Expected string"
 
-    // TODO Implement in place decoding JSON string to UTF-8.
-    // let utf8StringDecodedInPlace (v : JsonValue) : Memory<byte> = ...
+    let utf8StringDecodedInPlace (v : JsonValue) : Memory<byte> =
+        match v.Raw with
+        | RawString raw ->
+            if v.Used then
+                raiseJsonParsingException v Error.ValueAlreadyUsed "String already used"
+            v.Used <- true
+            let nBytes = decodeUtf8InPlace (v.Buffer.Span) raw
+            v.Buffer.Slice(raw.ContentStartPos, nBytes)
+        | _ -> raiseJsonParsingException v Error.UnexpectedKind "Expected string"
 
     // TODO Make functions below (dateTimeOffset, int, decimal, ...) use either
     //      in place decoded UTF-8 strings or original bytes directly.
