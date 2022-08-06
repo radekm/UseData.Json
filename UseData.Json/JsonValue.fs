@@ -55,19 +55,16 @@ type JsonValue internal (which : WhichValue, tracer : ITracer, buffer : Memory<b
                 disposed <- true
                 match raw with
                 | Object fields ->
-                    // TODO Optimize the most common case when all fields are used.
                     if fields.Count > 0 then
-                        if isNull usedFields then
-                            tracer.OnUnusedFields(which, fields.Keys |> Seq.toArray)
-                        else
-                            let unusedFields = fields.Keys |> Seq.filter (usedFields.Contains >> not) |> Seq.toArray
-                            if unusedFields.Length > 0 then
-                                tracer.OnUnusedFields(which, unusedFields)
+                        // All remaining fields are unused because `field` and `fieldOpt` remove used fields.
+                        tracer.OnUnusedFields(which, fields.Keys |> Seq.toArray)
                 | _ -> ()
 
 type FieldId = int
 
 module JsonValue =
+    /// Warning: `raw` and `utf8String` may be modified during parsing.
+    /// They could contain garbage after parsing.
     let parseRawValue
         (tracer : ITracer)
         (utf8String : Memory<byte>)
@@ -77,6 +74,8 @@ module JsonValue =
         use v = new JsonValue(Root, tracer, utf8String, raw)
         f v
 
+    /// Warning: `utf8String` may be modified during parsing.
+    /// It could contain garbage after parsing.
     let parseUtf8String
         (intern : string -> FieldId)
         (tracer : ITracer)
@@ -103,9 +102,11 @@ module Json =
         | Object fields ->
             if not (v.UsedFields.Add id) then
                 raiseJsonParsingException v Error.FieldAlreadyUsed $"Field %d{id}"
-            // TODO Should we remove value so it's not used again and memory is saved?
-            //      Removing used fields would speed up tracing of unused fields.
-            let present, raw = fields.TryGetValue id
+            // Removing used fields has two benefits:
+            // - It speeds up finding unused fields - simply all remaining fields are unused.
+            // - It conserves memory.
+            // Unfortunately it could be unexpected that underlying `RawValue` is modified.
+            let present, raw = fields.Remove id
             if not present
             then raiseJsonParsingException v Error.FieldNotPresent $"Field %d{id}"
             else
@@ -119,8 +120,7 @@ module Json =
         | Object fields ->
             if not (v.UsedFields.Add id) then
                 raiseJsonParsingException v Error.FieldAlreadyUsed $"Field %d{id}"
-            // TODO Should we remove value so it's not used again and memory is saved?
-            let present, raw = fields.TryGetValue id
+            let present, raw = fields.Remove id
             if not present || raw = Null
             then ValueNone
             else
