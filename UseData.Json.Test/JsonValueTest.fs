@@ -57,6 +57,35 @@ let ``parse array of decimals`` () =
         res)
 
 [<Test>]
+let ``parse date time offsets`` () =
+    let json = Encoding.UTF8.GetBytes """
+        [
+            "2022-12-03T12:17:59Z",
+            "2022-12-03T12:17:59.1Z",
+            "2022-12-03T12:17:59.12Z",
+            "2022-12-03T12:17:59.123Z",
+            "2022-12-03T12:17:59.1234Z",
+            "2022-12-03T12:17:59.12345Z",
+            "2022-12-03T12:17:59.123456Z",
+            "2022-12-03T12:17:59.1234567Z"
+        ]
+    """
+    let struct (res, len) =
+        JsonValue.parseUtf8String failTestOnUnusedFieldTracer (Memory json) maxNesting (Json.map Json.dateTimeOffset)
+    Assert.AreEqual(Array.LastIndexOf(json, ']'B) + 1, len)
+    CollectionAssert.AreEqual(
+        [| DateTimeOffset(2022, 12, 3, 12, 17, 59, TimeSpan.Zero)
+           DateTimeOffset(2022, 12, 3, 12, 17, 59, 100, TimeSpan.Zero)
+           DateTimeOffset(2022, 12, 3, 12, 17, 59, 120, TimeSpan.Zero)
+           DateTimeOffset(2022, 12, 3, 12, 17, 59, 123, TimeSpan.Zero)
+           DateTimeOffset(2022, 12, 3, 12, 17, 59, TimeSpan.Zero).AddTicks(1234000)
+           DateTimeOffset(2022, 12, 3, 12, 17, 59, TimeSpan.Zero).AddTicks(1234500)
+           DateTimeOffset(2022, 12, 3, 12, 17, 59, TimeSpan.Zero).AddTicks(1234560)
+           DateTimeOffset(2022, 12, 3, 12, 17, 59, TimeSpan.Zero).AddTicks(1234567)
+        |],
+        res)
+
+[<Test>]
 let ``decode UTF-8 in place`` () =
     let json = Encoding.UTF8.GetBytes " \"\\uABCD\\n😈\" "
     let struct (res, pos) =
