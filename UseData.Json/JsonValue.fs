@@ -141,6 +141,21 @@ module Json =
                 ValueSome (f v)
         | _ -> raiseJsonParsingException v Error.UnexpectedKind $"Cannot get field %s{name} when kind is not object"
 
+    let dict (f : JsonValue -> 'T) (v : JsonValue) =
+        match v.Raw with
+        | Object fields ->
+            try
+                let result = Dictionary(fields.Count)
+                for kv in fields do
+                    use v = new JsonValue(ObjectField (v.Which, kv.Key), v.Tracer, v.Buffer, kv.Value)
+                    result[kv.Key] <- f v
+                result
+            finally
+                for kv in fields do
+                    v.UsedFields.Add kv.Key |> ignore
+                fields.Clear()
+        | _ -> raiseJsonParsingException v Error.UnexpectedKind "Expected object"
+
     let map (f : JsonValue -> 'T) (v : JsonValue) : 'T[] =
         match v.Raw with
         | Array items ->

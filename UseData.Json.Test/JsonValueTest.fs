@@ -118,6 +118,25 @@ let ``unused fields are reported`` () =
     CollectionAssert.AreEquivalent(["y"], unusedFields)
 
 [<Test>]
+let ``parse remaining fields to dictionary`` () =
+    let json = Encoding.UTF8.GetBytes """
+        {
+            "a": 1,
+            "b": "foo",
+            "c": "bar",
+            "d": true
+        }
+    """
+    let res = JsonValue.parseWhole failTestOnUnusedFieldTracer (Memory json) maxNesting (fun v ->
+        {| A = v |> Json.field "a" Json.int
+           D = v |> Json.field "d" Json.bool
+           Rest = v |> Json.dict Json.string
+        |})
+    Assert.AreEqual(1, res.A)
+    Assert.AreEqual(true, res.D)
+    CollectionAssert.AreEquivalent(dict ["b", "foo"; "c", "bar"], res.Rest)
+
+[<Test>]
 let ``fails when required field is missing`` () =
     let json = Encoding.UTF8.GetBytes """
         {
