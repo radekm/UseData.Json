@@ -28,7 +28,7 @@ let ``parse simple object`` () =
         }
     """
     let struct (res, len) =
-        JsonValue.parseUtf8String failTestOnUnusedFieldTracer (Memory json) maxNesting (fun v ->
+        JsonValue.parsePrefix failTestOnUnusedFieldTracer (Memory json) maxNesting (fun v ->
             {| User = v |> Json.field "user" Json.string
                Active = v |> Json.field "active" Json.bool
                Registered = v |> Json.field "registered" Json.dateTimeOffset
@@ -50,7 +50,7 @@ let ``parse array of decimals`` () =
         ]
     """
     let struct (res, len) =
-        JsonValue.parseUtf8String failTestOnUnusedFieldTracer (Memory json) maxNesting (Json.map Json.decimal)
+        JsonValue.parsePrefix failTestOnUnusedFieldTracer (Memory json) maxNesting (Json.map Json.decimal)
     Assert.AreEqual(Array.LastIndexOf(json, ']'B) + 1, len)
     CollectionAssert.AreEqual(
         [| 1M; 0M; 0.2M; 1e4M; 123.4e4M |],
@@ -71,7 +71,7 @@ let ``parse date time offsets`` () =
         ]
     """
     let struct (res, len) =
-        JsonValue.parseUtf8String failTestOnUnusedFieldTracer (Memory json) maxNesting (Json.map Json.dateTimeOffset)
+        JsonValue.parsePrefix failTestOnUnusedFieldTracer (Memory json) maxNesting (Json.map Json.dateTimeOffset)
     Assert.AreEqual(Array.LastIndexOf(json, ']'B) + 1, len)
     CollectionAssert.AreEqual(
         [| DateTimeOffset(2022, 12, 3, 12, 17, 59, TimeSpan.Zero)
@@ -89,7 +89,7 @@ let ``parse date time offsets`` () =
 let ``decode UTF-8 in place`` () =
     let json = Encoding.UTF8.GetBytes " \"\\uABCD\\n😈\" "
     let struct (res, pos) =
-        JsonValue.parseUtf8String failTestOnUnusedFieldTracer (Memory json) maxNesting Json.utf8StringDecodedInPlace
+        JsonValue.parsePrefix failTestOnUnusedFieldTracer (Memory json) maxNesting Json.utf8StringDecodedInPlace
 
     Assert.AreEqual(15, pos)
     CollectionAssert.AreEqual(
@@ -109,7 +109,7 @@ let ``unused fields are reported`` () =
             "y": 12.3
         }
     """
-    let struct (res, len) = JsonValue.parseUtf8String tracer (Memory json) maxNesting (fun v ->
+    let struct (res, len) = JsonValue.parsePrefix tracer (Memory json) maxNesting (fun v ->
         v |> Json.field "x" Json.decimal)
     Assert.AreEqual(Array.LastIndexOf(json, '}'B) + 1, len)
     Assert.AreEqual(
@@ -125,7 +125,7 @@ let ``fails when required field is missing`` () =
         }
     """
     let ex = Assert.Throws<JsonParsingException>(fun () ->
-        JsonValue.parseUtf8String ignoreUnusedFieldTracer (Memory json) maxNesting (fun v ->
+        JsonValue.parseWhole ignoreUnusedFieldTracer (Memory json) maxNesting (fun v ->
             v |> Json.field "foo" Json.bool)
         |> ignore)
     Assert.AreEqual(Root, ex.Which)
@@ -140,7 +140,7 @@ let ``fails when one field is read twice`` () =
         }
     """
     let ex = Assert.Throws<JsonParsingException>(fun () ->
-        JsonValue.parseUtf8String ignoreUnusedFieldTracer (Memory json) maxNesting (fun v ->
+        JsonValue.parseWhole ignoreUnusedFieldTracer (Memory json) maxNesting (fun v ->
             // We read `buy` twice. And this mistake should be caught by exception.
             Json.field "buy" Json.decimal v + Json.field "buy" Json.decimal v)
         |> ignore)
@@ -155,7 +155,7 @@ let ``fails when array is read twice`` () =
         }
     """
     let ex = Assert.Throws<JsonParsingException>(fun () ->
-        JsonValue.parseUtf8String failTestOnUnusedFieldTracer (Memory json) maxNesting (fun v ->
+        JsonValue.parseWhole failTestOnUnusedFieldTracer (Memory json) maxNesting (fun v ->
             v
             |> Json.field "numbers" (fun v ->
                 let positive = v |> Json.map Json.int |> Array.filter (fun x -> x > 0)
@@ -169,7 +169,7 @@ let ``fails when array is read twice`` () =
 let ``fails when string is read twice`` () =
     let json = Encoding.UTF8.GetBytes """ "foo" """
     let ex = Assert.Throws<JsonParsingException>(fun () ->
-        JsonValue.parseUtf8String failTestOnUnusedFieldTracer (Memory json) maxNesting (fun v ->
+        JsonValue.parseWhole failTestOnUnusedFieldTracer (Memory json) maxNesting (fun v ->
             Json.string v + Json.string v)
         |> ignore)
     Assert.AreEqual(Root, ex.Which)
@@ -179,7 +179,7 @@ let ``fails when string is read twice`` () =
 let ``fails when number is read twice`` () =
     let json = Encoding.UTF8.GetBytes """ 23 """
     let ex = Assert.Throws<JsonParsingException>(fun () ->
-        JsonValue.parseUtf8String failTestOnUnusedFieldTracer (Memory json) maxNesting (fun v ->
+        JsonValue.parseWhole failTestOnUnusedFieldTracer (Memory json) maxNesting (fun v ->
             Json.int v + Json.int v)
         |> ignore)
     Assert.AreEqual(Root, ex.Which)

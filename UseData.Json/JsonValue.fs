@@ -76,7 +76,7 @@ module JsonValue =
 
     /// Warning: `utf8String` may be modified during parsing.
     /// It could contain garbage after parsing.
-    let parseUtf8String
+    let parsePrefix
         (tracer : ITracer)
         (utf8String : Memory<byte>)
         (maxNesting : int)
@@ -85,6 +85,20 @@ module JsonValue =
         let struct (raw, pos) = Parser.parseRawValue (Span.op_Implicit utf8String.Span) 0 maxNesting
         let result = parseRawValue tracer utf8String raw f
         struct (result, pos)
+
+    /// Warning: `utf8String` may be modified during parsing.
+    /// It could contain garbage after parsing.
+    let parseWhole
+        (tracer : ITracer)
+        (utf8String : Memory<byte>)
+        (maxNesting : int)
+        (f : JsonValue -> 'T) : 'T =
+
+        let struct (result, pos) = parsePrefix tracer utf8String maxNesting f
+        let pos = skipWhitespace (Span.op_Implicit utf8String.Span) pos
+        if pos < utf8String.Length then
+            failwith "Unexpected bytes after JSON value"
+        result
 
 module Json =
     let private raiseJsonParsingExceptionWithCause (v : JsonValue) error info cause =
