@@ -430,12 +430,12 @@ let inline parseNumber (span : ReadOnlySpan<byte>) (pos : int) : struct (RawNumb
 
     struct ({ ContentStartPos = startPos; ContentEndPos = pos }, pos)
 
-type FieldId = int
+type FieldName = string
 
 [<CustomEquality>]
 [<NoComparison>]
 type RawValue =
-    | Object of IDictionary<FieldId, RawValue>
+    | Object of IDictionary<FieldName, RawValue>
     | Array of RawValue[]
     | RawString of RawString
     | RawNumber of RawNumber
@@ -491,22 +491,20 @@ let inline skipWhitespaceAndEnsureNotEndOfSpan (span : ReadOnlySpan<byte>) (pos 
 
 /// The first byte at `span[pos]` must be quote. But it's not checked.
 let rec inline parseField
-    (intern : string -> FieldId)
     (span : ReadOnlySpan<byte>)
     (pos : int)
-    (maxNesting : int) : struct (FieldId * RawValue * int) =
+    (maxNesting : int) : struct (FieldName * RawValue * int) =
 
     let struct (rawField, pos) = parseString span pos
-    let field = decodeUtf16 span rawField |> intern
+    let field = decodeUtf16 span rawField
     let pos = skipWhitespaceAndEnsureNotEndOfSpan span pos "Expecting colon"
     if span[pos] <> ':'B then
         raiseParsingException pos Error.InvalidObject "Expecting colon"
-    let struct (rawValue, pos) = parseRawValue intern span (pos + 1) maxNesting
+    let struct (rawValue, pos) = parseRawValue span (pos + 1) maxNesting
     struct (field, rawValue, pos)
 
 /// The first byte at `span[pos]` must be opening brace. But it's not checked.
 and inline parseObject
-    (intern : string -> FieldId)
     (span : ReadOnlySpan<byte>)
     (pos : int)
     (maxNesting : int) : struct (RawValue * int) =
@@ -517,7 +515,7 @@ and inline parseObject
     match span[pos] with
     | '}'B -> struct (Object fields, pos + 1)
     | '"'B ->
-        let struct (field, rawValue, pos) = parseField intern span pos maxNesting
+        let struct (field, rawValue, pos) = parseField span pos maxNesting
         fields[field] <- rawValue
         let mutable nextFieldPos = skipWhitespaceAndEnsureNotEndOfSpan span pos "Expecting comma or object end"
 
@@ -526,7 +524,7 @@ and inline parseObject
 
             if span[pos] <> '"'B then
                 raiseParsingException pos Error.InvalidObject "Expecting field"
-            let struct (field, rawValue, pos) = parseField intern span pos maxNesting
+            let struct (field, rawValue, pos) = parseField span pos maxNesting
 
             let n = fields.Count
             fields[field] <- rawValue
@@ -543,7 +541,6 @@ and inline parseObject
 
 /// The first byte at `span[pos]` must be opening bracket. But it's not checked.
 and inline parseArray
-    (intern : string -> FieldId)
     (span : ReadOnlySpan<byte>)
     (pos : int)
     (maxNesting : int) : struct (RawValue * int) =
@@ -554,14 +551,14 @@ and inline parseArray
     | _ ->
         let items = ResizeArray()
 
-        let struct (rawValue, pos) = parseRawValue intern span pos maxNesting
+        let struct (rawValue, pos) = parseRawValue span pos maxNesting
         items.Add(rawValue)
         let mutable nextItemPos = skipWhitespaceAndEnsureNotEndOfSpan span pos "Expecting comma or array end"
 
         while span[nextItemPos] = ','B do
             let pos = skipWhitespaceAndEnsureNotEndOfSpan span (nextItemPos + 1) "Expecting value"
 
-            let struct (rawValue, pos) = parseRawValue intern span pos maxNesting
+            let struct (rawValue, pos) = parseRawValue span pos maxNesting
             items.Add(rawValue)
 
             nextItemPos <- skipWhitespaceAndEnsureNotEndOfSpan span pos "Expecting comma or array end"
@@ -572,7 +569,6 @@ and inline parseArray
         struct (Array (items.ToArray()), nextItemPos + 1)
 
 and parseRawValue
-    (intern : string -> FieldId)
     (span : ReadOnlySpan<byte>)
     (pos : int)
     (maxNesting : int) : struct (RawValue * int) =
@@ -583,8 +579,8 @@ and parseRawValue
     let pos = skipWhitespaceAndEnsureNotEndOfSpan span pos "Expected JSON value"
 
     match span[pos] with
-    | '{'B -> parseObject intern span pos (maxNesting - 1)
-    | '['B -> parseArray intern span pos (maxNesting - 1)
+    | '{'B -> parseObject span pos (maxNesting - 1)
+    | '['B -> parseArray span pos (maxNesting - 1)
     | '"'B ->
         let struct (raw, pos) = parseString span pos
         struct (RawString raw, pos)

@@ -485,14 +485,6 @@ module BasicValue =
         |> Array.map (fun l -> l[spacesToStrip..])
         |> String.concat "\n"
 
-    let intern (fields : Dictionary<string, FieldId>) fieldName =
-        if fields.ContainsKey fieldName
-        then fields[fieldName]
-        else
-            let id = fields.Count
-            fields[fieldName] <- id
-            id
-
     [<Test>]
     let ``object with no fields, one field and several fields`` () =
         let json = stripMargin """
@@ -505,70 +497,60 @@ module BasicValue =
                 "empty object": {}
             }
         """
-        let fields = Dictionary()
-        let intern = intern fields
         let bytes = Encoding.UTF8.GetBytes json
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 4
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 4
 
-        CollectionAssert.AreEquivalent(
-            dict ["number", 0; "array", 1; "x", 2; "y", 3; "nested object", 4; "value", 5; "empty object", 6],
-            fields)
         Assert.AreEqual(158, pos)
         Assert.AreEqual(
             Object (dict [
-                0, RawNumber { ContentStartPos = 17; ContentEndPos = 18 }
-                1, Array [| RawNumber { ContentStartPos = 34; ContentEndPos = 35 }
-                            True
-                            Null
-                            False
-                            Object (dict [
-                                2, RawNumber { ContentStartPos = 63; ContentEndPos = 66 }
-                                3, Null
-                            ])
-                         |]
-                4, Object (dict [5, RawString { ContentStartPos = 123; ContentEndPos = 125; StringLength = 2 }])
-                6, Object (dict [])
+                "number", RawNumber { ContentStartPos = 17; ContentEndPos = 18 }
+                "array", Array [| RawNumber { ContentStartPos = 34; ContentEndPos = 35 }
+                                  True
+                                  Null
+                                  False
+                                  Object (dict [
+                                      "x", RawNumber { ContentStartPos = 63; ContentEndPos = 66 }
+                                      "y", Null
+                                  ])
+                               |]
+                "nested object", Object (dict [
+                    "value", RawString { ContentStartPos = 123; ContentEndPos = 125; StringLength = 2 }
+                ])
+                "empty object", Object (dict [])
             ]),
             raw)
 
     [<Test>]
     let ``top-level primitives`` () =
-        let fields = Dictionary()
-        let intern = intern fields
-
         let bytes = Encoding.UTF8.GetBytes "true"
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 1
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(4, pos)
         Assert.AreEqual(True, raw)
 
         let bytes = Encoding.UTF8.GetBytes "false"
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 1
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(5, pos)
         Assert.AreEqual(False, raw)
 
         let bytes = Encoding.UTF8.GetBytes "null"
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 1
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(4, pos)
         Assert.AreEqual(Null, raw)
 
         let bytes = Encoding.UTF8.GetBytes "17.2e44"
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 1
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(7, pos)
         Assert.AreEqual(RawNumber { ContentStartPos = 0; ContentEndPos = 7 }, raw)
 
         let bytes = Encoding.UTF8.GetBytes "\"hello!\""
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 1
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(8, pos)
         Assert.AreEqual(RawString { ContentStartPos = 1; ContentEndPos = 7; StringLength = 6 }, raw)
 
-        CollectionAssert.IsEmpty(fields)
-
     [<Test>]
     let ``top-level array`` () =
-        let fields = Dictionary()
-        let intern = intern fields
         let bytes = Encoding.UTF8.GetBytes "[\"first\", \"last\"]"
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 2
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 2
         Assert.AreEqual(17, pos)
         Assert.AreEqual(
             Array [| RawString { ContentStartPos = 2; ContentEndPos = 7; StringLength = 5 }
@@ -577,56 +559,52 @@ module BasicValue =
 
     [<Test>]
     let ``nesting limit for objects`` () =
-        let fields = Dictionary()
-        let intern = intern fields
         // Following example has nesting 4 - because 4 nested values are parsed
         // (top level object, object at `a`, object at `b`, number at `c`).
         let bytes = Encoding.UTF8.GetBytes """{ "a": { "b": {"c": 1} }  }"""
 
         // Max nesting 0 fails before the first opening brace.
         let ex = Assert.Throws<ParsingException>(fun () ->
-            parseRawValue intern (ReadOnlySpan bytes) 0 0 |> ignore)
+            parseRawValue (ReadOnlySpan bytes) 0 0 |> ignore)
         Assert.AreEqual(0, ex.pos)
         Assert.AreEqual(Error.TooDeepNesting, ex.error)
 
         // Max nesting 1 fails after the first colon.
         let ex = Assert.Throws<ParsingException>(fun () ->
-            parseRawValue intern (ReadOnlySpan bytes) 0 1 |> ignore)
+            parseRawValue (ReadOnlySpan bytes) 0 1 |> ignore)
         Assert.AreEqual(6, ex.pos)
         Assert.AreEqual(Error.TooDeepNesting, ex.error)
 
         // Max nesting 2 fails after the second colon.
         let ex = Assert.Throws<ParsingException>(fun () ->
-            parseRawValue intern (ReadOnlySpan bytes) 0 2 |> ignore)
+            parseRawValue (ReadOnlySpan bytes) 0 2 |> ignore)
         Assert.AreEqual(13, ex.pos)
         Assert.AreEqual(Error.TooDeepNesting, ex.error)
 
         // Max nesting 3 fails after the third colon.
         let ex = Assert.Throws<ParsingException>(fun () ->
-            parseRawValue intern (ReadOnlySpan bytes) 0 3 |> ignore)
+            parseRawValue (ReadOnlySpan bytes) 0 3 |> ignore)
         Assert.AreEqual(19, ex.pos)
         Assert.AreEqual(Error.TooDeepNesting, ex.error)
 
         // Max nesting 4 succeeds.
-        let struct (_, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 4
+        let struct (_, pos) = parseRawValue (ReadOnlySpan bytes) 0 4
         Assert.AreEqual(27, pos)
 
     [<Test>]
     let ``nesting limit for arrays`` () =
-        let fields = Dictionary()
-        let intern = intern fields
         // Following example has nesting 5 - because 5 nested values are parsed.
         let bytes = Encoding.UTF8.GetBytes """[1.2, [], [[[]]], [[[0]]], []]"""
 
         // Max nesting 0 fails before the first opening bracket.
         let ex = Assert.Throws<ParsingException>(fun () ->
-            parseRawValue intern (ReadOnlySpan bytes) 0 0 |> ignore)
+            parseRawValue (ReadOnlySpan bytes) 0 0 |> ignore)
         Assert.AreEqual(0, ex.pos)
         Assert.AreEqual(Error.TooDeepNesting, ex.error)
 
         // Max nesting 1 fails after the first opening bracket.
         let ex = Assert.Throws<ParsingException>(fun () ->
-            parseRawValue intern (ReadOnlySpan bytes) 0 1 |> ignore)
+            parseRawValue (ReadOnlySpan bytes) 0 1 |> ignore)
         Assert.AreEqual(1, ex.pos)
         Assert.AreEqual(Error.TooDeepNesting, ex.error)
 
@@ -635,14 +613,14 @@ module BasicValue =
         // It doesn't fail after parsing `[1.2, [` because the array is empty,
         // so there's no need to parse another nested value.
         let ex = Assert.Throws<ParsingException>(fun () ->
-            parseRawValue intern (ReadOnlySpan bytes) 0 2 |> ignore)
+            parseRawValue (ReadOnlySpan bytes) 0 2 |> ignore)
         Assert.AreEqual(11, ex.pos)
         Assert.AreEqual(Error.TooDeepNesting, ex.error)
 
         // Max nesting 3 fails after parsing `[1.2, [], [[`
         // because there's a value `[]` inside the array.
         let ex = Assert.Throws<ParsingException>(fun () ->
-            parseRawValue intern (ReadOnlySpan bytes) 0 3 |> ignore)
+            parseRawValue (ReadOnlySpan bytes) 0 3 |> ignore)
         Assert.AreEqual(12, ex.pos)
         Assert.AreEqual(Error.TooDeepNesting, ex.error)
 
@@ -651,112 +629,102 @@ module BasicValue =
         // It doesn't fail after parsing `[1.2, [], [[[` because the array is empty,
         // so there's no need to parse another nested value.
         let ex = Assert.Throws<ParsingException>(fun () ->
-            parseRawValue intern (ReadOnlySpan bytes) 0 4 |> ignore)
+            parseRawValue (ReadOnlySpan bytes) 0 4 |> ignore)
         Assert.AreEqual(21, ex.pos)
         Assert.AreEqual(Error.TooDeepNesting, ex.error)
 
         // Max nesting 5 succeeds.
-        let struct (_, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 5
+        let struct (_, pos) = parseRawValue (ReadOnlySpan bytes) 0 5
         Assert.AreEqual(30, pos)
 
     [<Test>]
     let ``nesting limit for objects and arrays`` () =
-        let fields = Dictionary()
-        let intern = intern fields
         // Following example has nesting 3 - because 3 nested values are parsed.
         let bytes = Encoding.UTF8.GetBytes """[{}, {"x": 1}]"""
 
         // Max nesting 0 fails before the first opening bracket.
         let ex = Assert.Throws<ParsingException>(fun () ->
-            parseRawValue intern (ReadOnlySpan bytes) 0 0 |> ignore)
+            parseRawValue (ReadOnlySpan bytes) 0 0 |> ignore)
         Assert.AreEqual(0, ex.pos)
         Assert.AreEqual(Error.TooDeepNesting, ex.error)
 
         // Max nesting 1 fails after the first opening bracket.
         let ex = Assert.Throws<ParsingException>(fun () ->
-            parseRawValue intern (ReadOnlySpan bytes) 0 1 |> ignore)
+            parseRawValue (ReadOnlySpan bytes) 0 1 |> ignore)
         Assert.AreEqual(1, ex.pos)
         Assert.AreEqual(Error.TooDeepNesting, ex.error)
 
         // Max nesting 2 fails after the first colon, ie. after parsing `[{}, {"x":`.
         let ex = Assert.Throws<ParsingException>(fun () ->
-            parseRawValue intern (ReadOnlySpan bytes) 0 2 |> ignore)
+            parseRawValue (ReadOnlySpan bytes) 0 2 |> ignore)
         Assert.AreEqual(10, ex.pos)
         Assert.AreEqual(Error.TooDeepNesting, ex.error)
 
         // Max nesting 3 succeeds.
-        let struct (_, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 3
+        let struct (_, pos) = parseRawValue (ReadOnlySpan bytes) 0 3
         Assert.AreEqual(14, pos)
 
     [<Test>]
     let ``spacing in objects`` () =
-        let fields = Dictionary()
-        let intern = intern fields
-
         // Empty object.
         let bytes = Encoding.UTF8.GetBytes "{}"
         let expected = Object (dict [])
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 1
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(2, pos)
         Assert.AreEqual(expected, raw)
         let bytes = Encoding.UTF8.GetBytes "  {  }  "
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 1
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(6, pos)
         Assert.AreEqual(expected, raw)
 
         // Object with one field.
         let bytes = Encoding.UTF8.GetBytes """{"a":1e2}"""
-        let expected = Object (dict [0, RawNumber { ContentStartPos = 5; ContentEndPos = 8 }])
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 2
+        let expected = Object (dict ["a", RawNumber { ContentStartPos = 5; ContentEndPos = 8 }])
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 2
         Assert.AreEqual(9, pos)
         Assert.AreEqual(expected, raw)
         let bytes = Encoding.UTF8.GetBytes  """  {  "a"  :  1e2  }  """
-        let expected = Object (dict [0, RawNumber { ContentStartPos = 13; ContentEndPos = 16 }])
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 2
+        let expected = Object (dict ["a", RawNumber { ContentStartPos = 13; ContentEndPos = 16 }])
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 2
         Assert.AreEqual(19, pos)
         Assert.AreEqual(expected, raw)
 
         // Object with two fields.
         let bytes = Encoding.UTF8.GetBytes """{"a":1,"b":""}"""
-        let expected = Object (dict [0, RawNumber { ContentStartPos = 5; ContentEndPos = 6 }
-                                     1, RawString { ContentStartPos = 12; ContentEndPos = 12; StringLength = 0 } ])
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 2
+        let expected = Object (dict ["a", RawNumber { ContentStartPos = 5; ContentEndPos = 6 }
+                                     "b", RawString { ContentStartPos = 12; ContentEndPos = 12; StringLength = 0 } ])
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 2
         Assert.AreEqual(14, pos)
         Assert.AreEqual(expected, raw)
         let bytes = Encoding.UTF8.GetBytes """  {  "a"  :  1  ,  "b"  :  ""  }  """
-        let expected = Object (dict [0, RawNumber { ContentStartPos = 13; ContentEndPos = 14 }
-                                     1, RawString { ContentStartPos = 28; ContentEndPos = 28; StringLength = 0 } ])
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 2
+        let expected = Object (dict ["a", RawNumber { ContentStartPos = 13; ContentEndPos = 14 }
+                                     "b", RawString { ContentStartPos = 28; ContentEndPos = 28; StringLength = 0 } ])
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 2
         Assert.AreEqual(32, pos)
         Assert.AreEqual(expected, raw)
 
-        CollectionAssert.AreEquivalent(dict ["a", 0; "b", 1], fields)
-
     [<Test>]
     let ``spacing in arrays`` () =
-        let fields = Dictionary()
-        let intern = intern fields
-
         // Empty array.
         let bytes = Encoding.UTF8.GetBytes "[]"
         let expected = Array [||]
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 1
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(2, pos)
         Assert.AreEqual(expected, raw)
         let bytes = Encoding.UTF8.GetBytes "  [  ]  "
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 1
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(6, pos)
         Assert.AreEqual(expected, raw)
 
         // Array with one item.
         let bytes = Encoding.UTF8.GetBytes "[-1]"
         let expected = Array [| RawNumber { ContentStartPos = 1; ContentEndPos = 3 } |]
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 2
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 2
         Assert.AreEqual(4, pos)
         Assert.AreEqual(expected, raw)
         let bytes = Encoding.UTF8.GetBytes "  [  -1  ]  "
         let expected = Array [| RawNumber { ContentStartPos = 5; ContentEndPos = 7 } |]
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 2
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 2
         Assert.AreEqual(10, pos)
         Assert.AreEqual(expected, raw)
 
@@ -764,96 +732,86 @@ module BasicValue =
         let bytes = Encoding.UTF8.GetBytes "[-1,-3]"
         let expected = Array [| RawNumber { ContentStartPos = 1; ContentEndPos = 3 }
                                 RawNumber { ContentStartPos = 4; ContentEndPos = 6 } |]
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 2
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 2
         Assert.AreEqual(7, pos)
         Assert.AreEqual(expected, raw)
         let bytes = Encoding.UTF8.GetBytes "  [  -1  ,  -3  ]  "
         let expected = Array [| RawNumber { ContentStartPos = 5; ContentEndPos = 7 }
                                 RawNumber { ContentStartPos = 12; ContentEndPos = 14 } |]
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 2
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 2
         Assert.AreEqual(17, pos)
         Assert.AreEqual(expected, raw)
 
-        CollectionAssert.IsEmpty(fields)
-
     [<Test>]
     let ``spacing around primitive values`` () =
-        let fields = Dictionary()
-        let intern = intern fields
-
         // Strings.
         let bytes = Encoding.UTF8.GetBytes "\"a\""
         let expected = RawString { ContentStartPos = 1; ContentEndPos = 2; StringLength = 1 }
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 1
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(3, pos)
         Assert.AreEqual(expected, raw)
         let bytes = Encoding.UTF8.GetBytes "  \"a\"  "
         let expected = RawString { ContentStartPos = 3; ContentEndPos = 4; StringLength = 1 }
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 1
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(5, pos)
         Assert.AreEqual(expected, raw)
 
         // Numbers.
         let bytes = Encoding.UTF8.GetBytes "1"
         let expected = RawNumber { ContentStartPos = 0; ContentEndPos = 1 }
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 1
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(1, pos)
         Assert.AreEqual(expected, raw)
         let bytes = Encoding.UTF8.GetBytes "  1  "
         let expected = RawNumber { ContentStartPos = 2; ContentEndPos = 3 }
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 1
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(3, pos)
         Assert.AreEqual(expected, raw)
 
         // True.
         let bytes = Encoding.UTF8.GetBytes "true"
         let expected = True
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 1
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(4, pos)
         Assert.AreEqual(expected, raw)
         let bytes = Encoding.UTF8.GetBytes "  true  "
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 1
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(6, pos)
         Assert.AreEqual(expected, raw)
 
         // False.
         let bytes = Encoding.UTF8.GetBytes "false"
         let expected = False
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 1
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(5, pos)
         Assert.AreEqual(expected, raw)
         let bytes = Encoding.UTF8.GetBytes "  false  "
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 1
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(7, pos)
         Assert.AreEqual(expected, raw)
 
         // True.
         let bytes = Encoding.UTF8.GetBytes "null"
         let expected = Null
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 1
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(4, pos)
         Assert.AreEqual(expected, raw)
         let bytes = Encoding.UTF8.GetBytes "  null  "
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 1
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(6, pos)
         Assert.AreEqual(expected, raw)
 
-        CollectionAssert.IsEmpty(fields)
-
     [<Test>]
     let ``duplicate fields are not allowed`` () =
-        let fields = Dictionary()
-        let intern = intern fields
-
         // Duplicate field is rejected even if value is same.
         let bytes = Encoding.UTF8.GetBytes """{ "a": 1, "a": 1 }"""
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 2 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 2 |> ignore)
         Assert.AreEqual(16, ex.pos)  // Position after parsing associated value.
         Assert.AreEqual(Error.DuplicateField, ex.error)
 
         // Field is duplicate if code points after decoding are same.
         let bytes = Encoding.UTF8.GetBytes """{ "a": 1, "\u0061": 1 }"""
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 2 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 2 |> ignore)
         Assert.AreEqual(21, ex.pos)  // Position after parsing associated value.
         Assert.AreEqual(Error.DuplicateField, ex.error)
 
@@ -861,22 +819,19 @@ module BasicValue =
         // The first field is `Latin Small Letter C with Caron`.
         // The second field is `Latin Small Letter C` followed by `Combining Caron`.
         let bytes = Encoding.UTF8.GetBytes """{ "č": 1, "č": 1 }"""
-        let struct (_, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 2
+        let struct (_, pos) = parseRawValue (ReadOnlySpan bytes) 0 2
         // Position is 21 because the first field name has 2 bytes (C4 8D)
         // and the second field name has 3 bytes (63 CC 8C).
         Assert.AreEqual(21, pos)
 
     [<Test>]
     let ``valid value can be followed by another value`` () =
-        let fields = Dictionary()
-        let intern = intern fields
-
         let bytes = Encoding.UTF8.GetBytes """001e2{"x":1.2}nulltrue133.6e-5false"hello"  []{}"""
         let expected = [
             RawNumber { ContentStartPos = 0; ContentEndPos = 1 }  // 0
             RawNumber { ContentStartPos = 1; ContentEndPos = 2 }  // 0
             RawNumber { ContentStartPos = 2; ContentEndPos = 5 }  // 1e2
-            Object (dict [ 0, RawNumber { ContentStartPos = 10; ContentEndPos = 13 } ])  // {"x":1.2}
+            Object (dict [ "x", RawNumber { ContentStartPos = 10; ContentEndPos = 13 } ])  // {"x":1.2}
             Null
             True
             RawNumber { ContentStartPos = 22; ContentEndPos = 30 }  // 133.6e-5
@@ -890,248 +845,228 @@ module BasicValue =
         let mutable pos = 0
         let span = ReadOnlySpan bytes
         while pos < span.Length do
-            let struct (raw, endPos) = parseRawValue intern span pos 2
+            let struct (raw, endPos) = parseRawValue span pos 2
             actual.Add raw
             pos <- skipWhitespace span endPos  // Skip optional whitespace between values.
 
         CollectionAssert.AreEqual(expected, actual)
-        CollectionAssert.AreEquivalent(dict ["x", 0], fields)
 
     [<Test>]
     let ``valid value can be followed by garbage`` () =
-        let fields = Dictionary()
-        let intern = intern fields
-
         let bytes = Encoding.UTF8.GetBytes "{}garbage"
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 1
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(2, pos)
         Assert.AreEqual(Object (dict []), raw)
 
         let bytes = Encoding.UTF8.GetBytes "[]garbage"
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 1
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(2, pos)
         Assert.AreEqual(Array [||], raw)
 
         let bytes = Encoding.UTF8.GetBytes "\"hi\"garbage"
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 1
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(4, pos)
         Assert.AreEqual(RawString { ContentStartPos = 1; ContentEndPos = 3; StringLength = 2 }, raw)
 
         let bytes = Encoding.UTF8.GetBytes "1garbage"
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 1
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(1, pos)
         Assert.AreEqual(RawNumber { ContentStartPos = 0; ContentEndPos = 1 }, raw)
 
         let bytes = Encoding.UTF8.GetBytes "1e2e3"
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 1
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(3, pos)
         Assert.AreEqual(RawNumber { ContentStartPos = 0; ContentEndPos = 3 }, raw)
 
         let bytes = Encoding.UTF8.GetBytes "1.2.4e2"
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 1
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(3, pos)
         Assert.AreEqual(RawNumber { ContentStartPos = 0; ContentEndPos = 3 }, raw)
 
         let bytes = Encoding.UTF8.GetBytes "truegarbage"
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 1
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(4, pos)
         Assert.AreEqual(True, raw)
 
         let bytes = Encoding.UTF8.GetBytes "falsegarbage"
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 1
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(5, pos)
         Assert.AreEqual(False, raw)
 
         let bytes = Encoding.UTF8.GetBytes "nullgarbage"
-        let struct (raw, pos) = parseRawValue intern (ReadOnlySpan bytes) 0 1
+        let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(4, pos)
         Assert.AreEqual(Null, raw)
 
-        CollectionAssert.IsEmpty(fields)
-
     [<Test>]
     let ``unfinished primitive`` () =
-        let fields = Dictionary()
-        let intern = intern fields
-
         let bytes = Encoding.UTF8.GetBytes """"Missing end quote"""
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 1 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 1 |> ignore)
         Assert.AreEqual(18, ex.pos)
         Assert.AreEqual(Error.UnexpectedEndOfSpan, ex.error)
 
         let bytes = Encoding.UTF8.GetBytes "1e"
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 1 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 1 |> ignore)
         Assert.AreEqual(2, ex.pos)
         Assert.AreEqual(Error.UnexpectedEndOfSpan, ex.error)
 
         let bytes = Encoding.UTF8.GetBytes "  0.  "
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 1 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 1 |> ignore)
         Assert.AreEqual(4, ex.pos)
         Assert.AreEqual(Error.InvalidNumber, ex.error)
 
         let bytes = Encoding.UTF8.GetBytes "77.9e"
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 1 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 1 |> ignore)
         Assert.AreEqual(5, ex.pos)
         Assert.AreEqual(Error.UnexpectedEndOfSpan, ex.error)
 
         let bytes = Encoding.UTF8.GetBytes "tru"
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 1 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 1 |> ignore)
         // Position is 0 because parser checks if there's enough bytes immediately after seeing initial `t`.
         Assert.AreEqual(0, ex.pos)
         Assert.AreEqual(Error.UnexpectedEndOfSpan, ex.error)
 
         // We need at least 3 spaces after `t` so parser sees there's enough bytes.
         let bytes = Encoding.UTF8.GetBytes "  t   "
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 1 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 1 |> ignore)
         Assert.AreEqual(2, ex.pos)
         Assert.AreEqual(Error.InvalidValue, ex.error)
 
         let bytes = Encoding.UTF8.GetBytes "f"
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 1 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 1 |> ignore)
         Assert.AreEqual(0, ex.pos)
         Assert.AreEqual(Error.UnexpectedEndOfSpan, ex.error)
 
         let bytes = Encoding.UTF8.GetBytes "  fals  "
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 1 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 1 |> ignore)
         Assert.AreEqual(2, ex.pos)
         Assert.AreEqual(Error.InvalidValue, ex.error)
 
         let bytes = Encoding.UTF8.GetBytes "n"
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 1 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 1 |> ignore)
         Assert.AreEqual(0, ex.pos)
         Assert.AreEqual(Error.UnexpectedEndOfSpan, ex.error)
 
         let bytes = Encoding.UTF8.GetBytes " nul  "
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 1 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 1 |> ignore)
         Assert.AreEqual(1, ex.pos)
         Assert.AreEqual(Error.InvalidValue, ex.error)
 
-        CollectionAssert.IsEmpty(fields)
-
     [<Test>]
     let ``invalid object`` () =
-        let fields = Dictionary()
-        let intern = intern fields
-
         let bytes = Encoding.UTF8.GetBytes """{"a"}"""
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 2 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 2 |> ignore)
         Assert.AreEqual(4, ex.pos)
         Assert.AreEqual(Error.InvalidObject, ex.error)
 
         let bytes = Encoding.UTF8.GetBytes """{"a":}"""
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 2 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 2 |> ignore)
         Assert.AreEqual(5, ex.pos)
         // Because the value is expected and instead the closing brace is found.
         Assert.AreEqual(Error.InvalidValue, ex.error)
 
         let bytes = Encoding.UTF8.GetBytes """{"a":,}"""
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 2 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 2 |> ignore)
         Assert.AreEqual(5, ex.pos)
         // Because the value is expected and instead the comma is found.
         Assert.AreEqual(Error.InvalidValue, ex.error)
 
         let bytes = Encoding.UTF8.GetBytes """{"a":: 1}"""
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 2 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 2 |> ignore)
         Assert.AreEqual(5, ex.pos)
         // Because the value is expected and instead the colon is found.
         Assert.AreEqual(Error.InvalidValue, ex.error)
 
         let bytes = Encoding.UTF8.GetBytes """{"a" ,}"""
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 2 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 2 |> ignore)
         Assert.AreEqual(5, ex.pos)
         Assert.AreEqual(Error.InvalidObject, ex.error)
 
         let bytes = Encoding.UTF8.GetBytes """{:}"""
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 2 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 2 |> ignore)
         Assert.AreEqual(1, ex.pos)
         Assert.AreEqual(Error.InvalidObject, ex.error)
 
         let bytes = Encoding.UTF8.GetBytes """{,}"""
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 2 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 2 |> ignore)
         Assert.AreEqual(1, ex.pos)
         Assert.AreEqual(Error.InvalidObject, ex.error)
 
         let bytes = Encoding.UTF8.GetBytes """{true: false}"""
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 2 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 2 |> ignore)
         Assert.AreEqual(1, ex.pos)
         Assert.AreEqual(Error.InvalidObject, ex.error)
 
         let bytes = Encoding.UTF8.GetBytes """{1: 2}"""
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 2 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 2 |> ignore)
         Assert.AreEqual(1, ex.pos)
         Assert.AreEqual(Error.InvalidObject, ex.error)
 
         let bytes = Encoding.UTF8.GetBytes """{"a": """
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 2 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 2 |> ignore)
         Assert.AreEqual(6, ex.pos)
         Assert.AreEqual(Error.UnexpectedEndOfSpan, ex.error)
 
         let bytes = Encoding.UTF8.GetBytes """{"a": 1"""
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 2 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 2 |> ignore)
         Assert.AreEqual(7, ex.pos)
         Assert.AreEqual(Error.UnexpectedEndOfSpan, ex.error)
 
         let bytes = Encoding.UTF8.GetBytes """{"a": 1,"""
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 2 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 2 |> ignore)
         Assert.AreEqual(8, ex.pos)
         Assert.AreEqual(Error.UnexpectedEndOfSpan, ex.error)
 
         let bytes = Encoding.UTF8.GetBytes """{"a": 1 "b": 2}"""
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 2 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 2 |> ignore)
         Assert.AreEqual(8, ex.pos)
         Assert.AreEqual(Error.InvalidObject, ex.error)
 
         let bytes = Encoding.UTF8.GetBytes """{"a": 1,, "b": 2}"""
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 2 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 2 |> ignore)
         Assert.AreEqual(8, ex.pos)
         Assert.AreEqual(Error.InvalidObject, ex.error)
 
         let bytes = Encoding.UTF8.GetBytes """{"a": 1 ]"""
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 2 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 2 |> ignore)
         Assert.AreEqual(8, ex.pos)
         Assert.AreEqual(Error.InvalidObject, ex.error)
 
     [<Test>]
     let ``invalid array`` () =
-        let fields = Dictionary()
-        let intern = intern fields
-
         let bytes = Encoding.UTF8.GetBytes """[1, ]"""
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 2 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 2 |> ignore)
         Assert.AreEqual(4, ex.pos)
         Assert.AreEqual(Error.InvalidValue, ex.error)
 
         let bytes = Encoding.UTF8.GetBytes """[1 2]"""
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 2 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 2 |> ignore)
         Assert.AreEqual(3, ex.pos)
         Assert.AreEqual(Error.InvalidArray, ex.error)
 
         let bytes = Encoding.UTF8.GetBytes """[1, 2,,]"""
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 2 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 2 |> ignore)
         Assert.AreEqual(6, ex.pos)
         Assert.AreEqual(Error.InvalidValue, ex.error)
 
         let bytes = Encoding.UTF8.GetBytes """[1, """
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 2 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 2 |> ignore)
         Assert.AreEqual(4, ex.pos)
         Assert.AreEqual(Error.UnexpectedEndOfSpan, ex.error)
 
         let bytes = Encoding.UTF8.GetBytes """[1, 2}"""
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 2 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 2 |> ignore)
         Assert.AreEqual(5, ex.pos)
         Assert.AreEqual(Error.InvalidArray, ex.error)
 
     [<Test>]
     let ``invalid top-level byte`` () =
-        let fields = Dictionary()
-        let intern = intern fields
-
         let bytes = Encoding.UTF8.GetBytes "}"
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 2 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 2 |> ignore)
         Assert.AreEqual(0, ex.pos)
         Assert.AreEqual(Error.InvalidValue, ex.error)
 
         let bytes = Encoding.UTF8.GetBytes "]"
-        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue intern (ReadOnlySpan bytes) 0 2 |> ignore)
+        let ex = Assert.Throws<ParsingException>(fun () -> parseRawValue (ReadOnlySpan bytes) 0 2 |> ignore)
         Assert.AreEqual(0, ex.pos)
         Assert.AreEqual(Error.InvalidValue, ex.error)

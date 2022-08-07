@@ -6,13 +6,15 @@ open System.Collections.Generic
 open System.Globalization
 open UseData.Json.Parser
 
+type FieldName = string
+
 type WhichValue =
     | Root
-    | ObjectField of parent:WhichValue * field:FieldId
+    | ObjectField of parent:WhichValue * field:FieldName
     | ArrayItem of parent:WhichValue * indexInArray:int
 
 type ITracer =
-    abstract OnUnusedFields : which:WhichValue * fields:FieldId[] -> unit
+    abstract OnUnusedFields : which:WhichValue * fields:FieldName[] -> unit
 
 [<RequireQualifiedAccess>]
 type Error =
@@ -31,7 +33,7 @@ type JsonParsingException(which : WhichValue, error : Error, info : string, inne
 
 [<Sealed>]
 type JsonValue internal (which : WhichValue, tracer : ITracer, buffer : Memory<byte>, raw : RawValue) =
-    let mutable usedFields = Unchecked.defaultof<HashSet<FieldId>>
+    let mutable usedFields = Unchecked.defaultof<HashSet<FieldName>>
     let mutable used = false
     let mutable disposed = false
 
@@ -60,8 +62,6 @@ type JsonValue internal (which : WhichValue, tracer : ITracer, buffer : Memory<b
                         tracer.OnUnusedFields(which, fields.Keys |> Seq.toArray)
                 | _ -> ()
 
-type FieldId = int
-
 module JsonValue =
     /// Warning: `raw` and `utf8String` may be modified during parsing.
     /// They could contain garbage after parsing.
@@ -77,13 +77,12 @@ module JsonValue =
     /// Warning: `utf8String` may be modified during parsing.
     /// It could contain garbage after parsing.
     let parseUtf8String
-        (intern : string -> FieldId)
         (tracer : ITracer)
         (utf8String : Memory<byte>)
         (maxNesting : int)
         (f : JsonValue -> 'T) : struct ('T * int) =
 
-        let struct (raw, pos) = Parser.parseRawValue intern (Span.op_Implicit utf8String.Span) 0 maxNesting
+        let struct (raw, pos) = Parser.parseRawValue (Span.op_Implicit utf8String.Span) 0 maxNesting
         let result = parseRawValue tracer utf8String raw f
         struct (result, pos)
 
@@ -97,36 +96,36 @@ module Json =
     let raw (v : JsonValue) : RawValue = v.Raw
 
     // Fails if field is not present.
-    let field (id : FieldId) (f : JsonValue -> 'T) (v : JsonValue) : 'T =
+    let field (name : FieldName) (f : JsonValue -> 'T) (v : JsonValue) : 'T =
         match v.Raw with
         | Object fields ->
-            if not (v.UsedFields.Add id) then
-                raiseJsonParsingException v Error.FieldAlreadyUsed $"Field %d{id}"
+            if not (v.UsedFields.Add name) then
+                raiseJsonParsingException v Error.FieldAlreadyUsed $"Field %s{name}"
             // Removing used fields has two benefits:
             // - It speeds up finding unused fields - simply all remaining fields are unused.
             // - It conserves memory.
             // Unfortunately it could be unexpected that underlying `RawValue` is modified.
-            let present, raw = fields.Remove id
+            let present, raw = fields.Remove name
             if not present
-            then raiseJsonParsingException v Error.FieldNotPresent $"Field %d{id}"
+            then raiseJsonParsingException v Error.FieldNotPresent $"Field %s{name}"
             else
-                use v = new JsonValue(ObjectField (v.Which, id), v.Tracer, v.Buffer, raw)
+                use v = new JsonValue(ObjectField (v.Which, name), v.Tracer, v.Buffer, raw)
                 f v
-        | _ -> raiseJsonParsingException v Error.UnexpectedKind $"Cannot get field %d{id} when kind is not object"
+        | _ -> raiseJsonParsingException v Error.UnexpectedKind $"Cannot get field %s{name} when kind is not object"
 
     /// Returns `None` iff field is not present or null.
-    let fieldOpt (id : FieldId) (f : JsonValue -> 'T) (v : JsonValue) : 'T voption =
+    let fieldOpt (name : FieldName) (f : JsonValue -> 'T) (v : JsonValue) : 'T voption =
         match v.Raw with
         | Object fields ->
-            if not (v.UsedFields.Add id) then
-                raiseJsonParsingException v Error.FieldAlreadyUsed $"Field %d{id}"
-            let present, raw = fields.Remove id
+            if not (v.UsedFields.Add name) then
+                raiseJsonParsingException v Error.FieldAlreadyUsed $"Field %s{name}"
+            let present, raw = fields.Remove name
             if not present || raw = Null
             then ValueNone
             else
-                use v = new JsonValue(ObjectField (v.Which, id), v.Tracer, v.Buffer, raw)
+                use v = new JsonValue(ObjectField (v.Which, name), v.Tracer, v.Buffer, raw)
                 ValueSome (f v)
-        | _ -> raiseJsonParsingException v Error.UnexpectedKind $"Cannot get field %d{id} when kind is not object"
+        | _ -> raiseJsonParsingException v Error.UnexpectedKind $"Cannot get field %s{name} when kind is not object"
 
     let map (f : JsonValue -> 'T) (v : JsonValue) : 'T[] =
         match v.Raw with
