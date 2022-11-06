@@ -203,3 +203,15 @@ let ``fails when number is read twice`` () =
         |> ignore)
     Assert.AreEqual(Root, ex.Which)
     Assert.AreEqual(Error.ValueAlreadyUsed, ex.Error)
+
+[<Test>]
+let ``ignored fields are considered as used`` () =
+    let json = Encoding.UTF8.GetBytes """
+        {
+            "user": "Peter",
+            "active": true
+        }
+    """
+    let struct ((), len) =
+        JsonValue.parsePrefix failTestOnUnusedFieldTracer (Memory json) maxNesting Json.ignoreFields
+    Assert.AreEqual(Array.LastIndexOf(json, '}'B) + 1, len)

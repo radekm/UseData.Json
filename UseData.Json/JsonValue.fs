@@ -2,8 +2,8 @@ namespace UseData.Json
 
 open System
 open System.Collections.Generic
-
 open System.Globalization
+
 open UseData.Json.Parser
 
 type FieldName = string
@@ -310,3 +310,11 @@ module Json =
         match v.Raw with
         | Null -> ValueNone
         | _ -> ValueSome (f v)
+
+    let ignoreFields (v : JsonValue) : unit =
+        match v.Raw with
+        | Object fields ->
+            for kv in fields do
+                v.UsedFields.Add kv.Key |> ignore
+            fields.Clear()
+        | _ -> raiseJsonParsingException v Error.UnexpectedKind "Expected object"
