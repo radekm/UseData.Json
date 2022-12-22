@@ -204,11 +204,10 @@ module Json =
     // TODO Make functions below (dateTimeOffset, int, decimal, ...) use either
     //      in place decoded UTF-8 strings or original bytes directly.
 
-    // `dateTimeOffset` must be defined before overriding `int.`
-    /// Accepts either format without fraction seconds or format with up to 7 digits of fractional seconds:
-    /// - Without fractional seconds `YYYY-mm-ddTHH:mm:ssZ` or `YYYY-mm-dd HH:mm:ssZ` (string length 20).
-    /// - With fractional seconds `YYYY-mm-ddTHH:mm:ss.fffZ` or `YYYY-mm-dd HH:mm:ss.fffZ` (string length 22-28).
-    let dateTimeOffset (v : JsonValue) : DateTimeOffset =
+    // `dateTimeOffsetHelper` must be defined before overriding `int.`
+    // Parses at most 7 digits of fractional seconds.
+    // If `approx` is `true` more digits are allowed but ignored.
+    let private dateTimeOffsetHelper (approx : bool) (v : JsonValue) : DateTimeOffset =
         let s = string v
         let error cause =
             raiseJsonParsingExceptionWithCause v Error.ParsingFailed $"Expected date time offset but got: %s{s}" cause
@@ -234,17 +233,38 @@ module Json =
 
                 match s.Length with
                 | 20 when s[19] = 'Z' -> withoutFractionalSeconds
-                | len when len >= 22 && len <= 28 && s[19] = '.' && s[len - 1] = 'Z' ->
+                | len when len >= 22 && s[19] = '.' && s[len - 1] = 'Z' ->
                     let mutable ticks = 0
-                    // Read fractional digits.
-                    for i = 20 to len - 2 do
-                        ticks <- ticks * 10 + readDigit i
-                    // Padding.
-                    for i = 1 to 28 - len do
-                        ticks <- ticks * 10
+
+                    if len <= 28 then
+                        // Read fractional digits.
+                        for i = 20 to len - 2 do
+                            ticks <- ticks * 10 + readDigit i
+                        // Padding.
+                        for i = 1 to 28 - len do
+                            ticks <- ticks * 10
+                    else
+                        if not approx then error (Exception "Unexpected form")
+
+                        // Read fractional digits.
+                        for i = 20 to 26 do
+                            ticks <- ticks * 10 + readDigit i
+                        // Check remaining fractional digits.
+                        for i = 27 to len - 2 do
+                            readDigit i |> ignore
+
                     withoutFractionalSeconds.AddTicks ticks
                 | _ -> error (Exception "Unexpected form")
             with e -> error e
+
+    /// Accepts either format without fractional seconds or format with up to 7 digits of fractional seconds.
+    /// - Without fractional seconds `YYYY-mm-ddTHH:mm:ssZ` or `YYYY-mm-dd HH:mm:ssZ` (string length 20).
+    /// - With fractional seconds `YYYY-mm-ddTHH:mm:ss.fffZ` or `YYYY-mm-dd HH:mm:ss.fffZ` (string length 22-28).
+    let dateTimeOffset : JsonValue -> DateTimeOffset = dateTimeOffsetHelper false
+
+    /// Same as `dateTimeOffset` but allows more than 7 digits of fractional seconds.
+    /// First 7 digits of fractional seconds are taken into account, rest is ignored.
+    let dateTimeOffsetApprox : JsonValue -> DateTimeOffset = dateTimeOffsetHelper true
 
     let inline private numberToString (v : JsonValue) =
         match v.Raw with

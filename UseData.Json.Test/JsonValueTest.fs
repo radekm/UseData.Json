@@ -86,6 +86,43 @@ let ``parse date time offsets`` () =
         res)
 
 [<Test>]
+let ``parse date time offsets approximately`` () =
+    let json = Encoding.UTF8.GetBytes """
+        [
+            "2022-12-03T12:17:59Z",
+            "2022-12-03T12:17:59.1Z",
+            "2022-12-03T12:17:59.12Z",
+            "2022-12-03T12:17:59.123Z",
+            "2022-12-03T12:17:59.1234Z",
+            "2022-12-03T12:17:59.12345Z",
+            "2022-12-03T12:17:59.123456Z",
+            "2022-12-03T12:17:59.1234567Z",
+            "2022-12-03T12:17:59.12345678Z",
+            "2022-12-03T12:17:59.123456789Z",
+            "2022-12-03T12:17:59.1234567890Z",
+            "2022-12-03T12:17:59.12345678901Z"
+        ]
+    """
+    let struct (res, len) =
+        JsonValue.parsePrefix failTestOnUnusedFieldTracer (Memory json) maxNesting (Json.map Json.dateTimeOffsetApprox)
+    Assert.AreEqual(Array.LastIndexOf(json, ']'B) + 1, len)
+    CollectionAssert.AreEqual(
+        [| DateTimeOffset(2022, 12, 3, 12, 17, 59, TimeSpan.Zero)
+           DateTimeOffset(2022, 12, 3, 12, 17, 59, 100, TimeSpan.Zero)
+           DateTimeOffset(2022, 12, 3, 12, 17, 59, 120, TimeSpan.Zero)
+           DateTimeOffset(2022, 12, 3, 12, 17, 59, 123, TimeSpan.Zero)
+           DateTimeOffset(2022, 12, 3, 12, 17, 59, TimeSpan.Zero).AddTicks(1234000)
+           DateTimeOffset(2022, 12, 3, 12, 17, 59, TimeSpan.Zero).AddTicks(1234500)
+           DateTimeOffset(2022, 12, 3, 12, 17, 59, TimeSpan.Zero).AddTicks(1234560)
+           DateTimeOffset(2022, 12, 3, 12, 17, 59, TimeSpan.Zero).AddTicks(1234567)
+           DateTimeOffset(2022, 12, 3, 12, 17, 59, TimeSpan.Zero).AddTicks(1234567)  // 8 fractional digits.
+           DateTimeOffset(2022, 12, 3, 12, 17, 59, TimeSpan.Zero).AddTicks(1234567)  // 9 fractional digits.
+           DateTimeOffset(2022, 12, 3, 12, 17, 59, TimeSpan.Zero).AddTicks(1234567)  // 10 fractional digits.
+           DateTimeOffset(2022, 12, 3, 12, 17, 59, TimeSpan.Zero).AddTicks(1234567)  // 11 fractional digits.
+        |],
+        res)
+
+[<Test>]
 let ``decode UTF-8 in place`` () =
     let json = Encoding.UTF8.GetBytes " \"\\uABCD\\n😈\" "
     let struct (res, pos) =
