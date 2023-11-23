@@ -56,10 +56,10 @@ type JsonValue internal (which : WhichValue, tracer : ITracer, buffer : Memory<b
             if not disposed then
                 disposed <- true
                 match raw with
-                | Object fields ->
-                    if fields.Count > 0 then
+                | Object o ->
+                    if o.Fields.Count > 0 then
                         // All remaining fields are unused because `field` and `fieldOpt` remove used fields.
-                        tracer.OnUnusedFields(which, fields.Keys |> Seq.toArray)
+                        tracer.OnUnusedFields(which, o.Fields.Keys |> Seq.toArray)
                 | _ -> ()
 
 module JsonValue =
@@ -112,14 +112,14 @@ module Json =
     // Fails if field is not present.
     let field (name : FieldName) (f : JsonValue -> 'T) (v : JsonValue) : 'T =
         match v.Raw with
-        | Object fields ->
+        | Object o ->
             if not (v.UsedFields.Add name) then
                 raiseJsonParsingException v Error.FieldAlreadyUsed $"Field %s{name}"
             // Removing used fields has two benefits:
             // - It speeds up finding unused fields - simply all remaining fields are unused.
             // - It conserves memory.
             // Unfortunately it could be unexpected that underlying `RawValue` is modified.
-            let present, raw = fields.Remove name
+            let present, raw = o.Fields.Remove name
             if not present
             then raiseJsonParsingException v Error.FieldNotPresent $"Field %s{name}"
             else
@@ -130,10 +130,10 @@ module Json =
     /// Returns `None` iff field is not present or null.
     let fieldOpt (name : FieldName) (f : JsonValue -> 'T) (v : JsonValue) : 'T voption =
         match v.Raw with
-        | Object fields ->
+        | Object o ->
             if not (v.UsedFields.Add name) then
                 raiseJsonParsingException v Error.FieldAlreadyUsed $"Field %s{name}"
-            let present, raw = fields.Remove name
+            let present, raw = o.Fields.Remove name
             if not present || raw = Null
             then ValueNone
             else
@@ -143,27 +143,27 @@ module Json =
 
     let dict (f : JsonValue -> 'T) (v : JsonValue) =
         match v.Raw with
-        | Object fields ->
+        | Object o ->
             try
-                let result = Dictionary(fields.Count)
-                for kv in fields do
+                let result = Dictionary(o.Fields.Count)
+                for kv in o.Fields do
                     use v = new JsonValue(ObjectField (v.Which, kv.Key), v.Tracer, v.Buffer, kv.Value)
                     result[kv.Key] <- f v
                 result
             finally
-                for kv in fields do
+                for kv in o.Fields do
                     v.UsedFields.Add kv.Key |> ignore
-                fields.Clear()
+                o.Fields.Clear()
         | _ -> raiseJsonParsingException v Error.UnexpectedKind "Expected object"
 
     let map (f : JsonValue -> 'T) (v : JsonValue) : 'T[] =
         match v.Raw with
-        | Array items ->
+        | Array arr ->
             if v.Used then
                 raiseJsonParsingException v Error.ValueAlreadyUsed "Array already used"
             v.Used <- true
             // TODO Should we set array items to null to conserve memory?
-            items
+            arr.Items
             |> Array.mapi (fun i raw ->
                 use v = new JsonValue(ArrayItem (v.Which, i), v.Tracer, v.Buffer, raw)
                 f v)
@@ -171,12 +171,12 @@ module Json =
 
     let iter (f : JsonValue -> unit) (v : JsonValue) : unit =
         match v.Raw with
-        | Array items ->
+        | Array arr ->
             if v.Used then
                 raiseJsonParsingException v Error.ValueAlreadyUsed "Array already used"
             v.Used <- true
             // TODO Should we set array items to null to conserve memory?
-            items
+            arr.Items
             |> Array.iteri (fun i raw ->
                 use v = new JsonValue(ArrayItem (v.Which, i), v.Tracer, v.Buffer, raw)
                 f v)
@@ -333,8 +333,8 @@ module Json =
 
     let ignoreFields (v : JsonValue) : unit =
         match v.Raw with
-        | Object fields ->
-            for kv in fields do
+        | Object o ->
+            for kv in o.Fields do
                 v.UsedFields.Add kv.Key |> ignore
-            fields.Clear()
+            o.Fields.Clear()
         | _ -> raiseJsonParsingException v Error.UnexpectedKind "Expected object"

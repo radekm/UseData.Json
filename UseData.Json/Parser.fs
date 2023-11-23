@@ -26,10 +26,12 @@ exception ParsingException of pos:int * error:Error * info:string
 
 let raiseParsingException pos code info = raise (ParsingException (pos, code, info))
 
-[<Struct>]
-type RawString = { ContentStartPos : int
+[<Struct; NoComparison>]
+type RawString = { /// Start position without opening quote.
+                   ContentStartPos : int
+                   /// End position without closing quote.
                    ContentEndPos : int
-                   /// Size when converted to .NET string.
+                   /// Length of JSON string after conversion to .NET string (from UTF-8 to UTF-16).
                    StringLength : int }
 
 let inline checkUtf8ContByte b pos =
@@ -362,7 +364,7 @@ let decodeUtf8InPlace (span : Span<byte>) (rawString : RawString) : int =
             writePos <- writePos + 1
     writePos - rawString.ContentStartPos
 
-[<Struct>]
+[<Struct; NoComparison>]
 type RawNumber = { ContentStartPos : int
                    ContentEndPos : int }
 
@@ -432,43 +434,49 @@ let inline parseNumber (span : ReadOnlySpan<byte>) (pos : int) : struct (RawNumb
 
 type FieldName = string
 
-[<CustomEquality>]
 [<NoComparison>]
 type RawValue =
-    | Object of IDictionary<FieldName, RawValue>
-    | Array of RawValue[]
+    | Object of RawObject
+    | Array of RawArray
     | RawString of RawString
     | RawNumber of RawNumber
     | True
     | False
     | Null
-    with
-        override me.Equals(o : obj) =
-            match o with
-            | :? RawValue as o ->
-                match me, o with
-                | Object fields, Object fields2 ->
-                    fields.Count = fields2.Count &&
-                    fields
-                    |> Seq.forall (fun kv ->
-                        let present, value2 = fields2.TryGetValue kv.Key
-                        present && kv.Value = value2)
-                | Array items, Array items2 -> items.Length = items2.Length && Array.forall2 (=) items items2
-                | RawString str, RawString str2 -> str = str2
-                | RawNumber num, RawNumber num2 -> num = num2
-                | True, True | False, False | Null, Null -> true
-                | _ -> false
-            | _ -> false
 
-        override me.GetHashCode() =
-            match me with
-            | Object fields -> fields.Count  // This is fast but not very good.
-            | Array items -> items.Length  // This is fast but not very good.
-            | RawString str -> str.GetHashCode()
-            | RawNumber num -> num.GetHashCode()
-            | True -> -1
-            | False -> -2
-            | Null -> -3
+and [<Struct; CustomEquality; NoComparison>] RawObject =
+    { StartPos : int
+      EndPos : int
+      Fields : IDictionary<FieldName, RawValue> }
+
+    override me.Equals(o : obj) =
+        match o with
+        | :? RawObject as o ->
+            me.StartPos = o.StartPos &&
+            me.EndPos = o.EndPos &&
+            me.Fields.Count = o.Fields.Count &&
+            me.Fields
+            |> Seq.forall (fun kv ->
+                let present, value = o.Fields.TryGetValue kv.Key
+                present && kv.Value = value)
+        | _ -> false
+
+    override me.GetHashCode() = me.StartPos
+
+and [<Struct; CustomEquality; NoComparison>] RawArray =
+    { StartPos : int
+      EndPos : int
+      Items : RawValue[] }
+
+    override me.Equals(arr : obj) =
+        match arr with
+        | :? RawArray as arr ->
+            me.StartPos = arr.StartPos &&
+            me.EndPos = arr.EndPos &&
+            me.Items = arr.Items
+        | _ -> false
+
+    override me.GetHashCode() = me.StartPos
 
 /// Returns position of the first first non-whitespace byte or after the last byte of span.
 let inline skipWhitespace (span : ReadOnlySpan<byte>) (pos : int) : int =
@@ -509,11 +517,12 @@ and inline parseObject
     (pos : int)
     (maxNesting : int) : struct (RawValue * int) =
 
+    let startPos = pos
     let fields = Dictionary()
 
     let pos = skipWhitespaceAndEnsureNotEndOfSpan span (pos + 1) "Expecting first field or object end"
     match span[pos] with
-    | '}'B -> struct (Object fields, pos + 1)
+    | '}'B -> struct (Object { StartPos = startPos; EndPos = pos + 1; Fields = fields }, pos + 1)
     | '"'B ->
         let struct (field, rawValue, pos) = parseField span pos maxNesting
         fields[field] <- rawValue
@@ -536,7 +545,7 @@ and inline parseObject
         if span[nextFieldPos] <> '}'B then
             raiseParsingException nextFieldPos Error.InvalidObject "Expecting object end"
 
-        struct (Object fields, nextFieldPos + 1)
+        struct (Object { StartPos = startPos; EndPos = nextFieldPos + 1; Fields  = fields }, nextFieldPos + 1)
     | _ -> raiseParsingException pos Error.InvalidObject "Expecting first field or object end"
 
 /// The first byte at `span[pos]` must be opening bracket. But it's not checked.
@@ -545,9 +554,11 @@ and inline parseArray
     (pos : int)
     (maxNesting : int) : struct (RawValue * int) =
 
+    let startPos = pos
+
     let pos = skipWhitespaceAndEnsureNotEndOfSpan span (pos + 1) "Expecting value or array end"
     match span[pos] with
-    | ']'B -> struct (Array [||], pos + 1)
+    | ']'B -> struct (Array { StartPos = startPos; EndPos = pos + 1; Items = [||] }, pos + 1)
     | _ ->
         let items = ResizeArray()
 
@@ -566,7 +577,7 @@ and inline parseArray
         if span[nextItemPos] <> ']'B then
             raiseParsingException nextItemPos Error.InvalidArray "Expecting array end"
 
-        struct (Array (items.ToArray()), nextItemPos + 1)
+        struct (Array { StartPos = startPos; EndPos = nextItemPos + 1; Items = items.ToArray() }, nextItemPos + 1)
 
 and parseRawValue
     (span : ReadOnlySpan<byte>)

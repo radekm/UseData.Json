@@ -502,22 +502,39 @@ module BasicValue =
 
         Assert.AreEqual(158, pos)
         Assert.AreEqual(
-            Object (dict [
-                "number", RawNumber { ContentStartPos = 17; ContentEndPos = 18 }
-                "array", Array [| RawNumber { ContentStartPos = 34; ContentEndPos = 35 }
-                                  True
-                                  Null
-                                  False
-                                  Object (dict [
-                                      "x", RawNumber { ContentStartPos = 63; ContentEndPos = 66 }
-                                      "y", Null
-                                  ])
-                               |]
-                "nested object", Object (dict [
-                    "value", RawString { ContentStartPos = 123; ContentEndPos = 125; StringLength = 2 }
-                ])
-                "empty object", Object (dict [])
-            ]),
+            Object
+                { StartPos = 1
+                  EndPos = 158
+                  Fields = dict [
+                      "number", RawNumber { ContentStartPos = 17; ContentEndPos = 18 }
+                      "array", Array { StartPos = 33
+                                       EndPos = 80
+                                       Items =
+                                           [| RawNumber { ContentStartPos = 34; ContentEndPos = 35 }
+                                              True
+                                              Null
+                                              False
+                                              Object
+                                                  { StartPos = 56
+                                                    EndPos = 79
+                                                    Fields = dict [
+                                                        "x", RawNumber { ContentStartPos = 63; ContentEndPos = 66 }
+                                                        "y", Null
+                                                    ]
+                                                  }
+                                           |]
+                                     }
+                      "nested object", Object { StartPos = 103
+                                                EndPos = 132
+                                                Fields = dict [
+                                                    "value", RawString { ContentStartPos = 123
+                                                                         ContentEndPos = 125
+                                                                         StringLength = 2 }
+                                                ]
+                                              }
+                      "empty object", Object { StartPos = 154; EndPos = 156; Fields = dict [] }
+                  ]
+                },
             raw)
 
     [<Test>]
@@ -553,8 +570,10 @@ module BasicValue =
         let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 2
         Assert.AreEqual(17, pos)
         Assert.AreEqual(
-            Array [| RawString { ContentStartPos = 2; ContentEndPos = 7; StringLength = 5 }
-                     RawString { ContentStartPos = 11; ContentEndPos = 15; StringLength = 4 } |],
+            Array { StartPos = 0
+                    EndPos = 17
+                    Items = [| RawString { ContentStartPos = 2; ContentEndPos = 7; StringLength = 5 }
+                               RawString { ContentStartPos = 11; ContentEndPos = 15; StringLength = 4 } |] },
             raw)
 
     [<Test>]
@@ -668,37 +687,48 @@ module BasicValue =
     let ``spacing in objects`` () =
         // Empty object.
         let bytes = Encoding.UTF8.GetBytes "{}"
-        let expected = Object (dict [])
+        let expected = Object { StartPos = 0; EndPos = 2; Fields = dict [] }
         let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(2, pos)
         Assert.AreEqual(expected, raw)
         let bytes = Encoding.UTF8.GetBytes "  {  }  "
+        let expected = Object { StartPos = 2; EndPos = 6; Fields = dict [] }
         let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(6, pos)
         Assert.AreEqual(expected, raw)
 
         // Object with one field.
         let bytes = Encoding.UTF8.GetBytes """{"a":1e2}"""
-        let expected = Object (dict ["a", RawNumber { ContentStartPos = 5; ContentEndPos = 8 }])
+        let expected = Object { StartPos = 0
+                                EndPos = 9
+                                Fields = dict ["a", RawNumber { ContentStartPos = 5; ContentEndPos = 8 }] }
         let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 2
         Assert.AreEqual(9, pos)
         Assert.AreEqual(expected, raw)
         let bytes = Encoding.UTF8.GetBytes  """  {  "a"  :  1e2  }  """
-        let expected = Object (dict ["a", RawNumber { ContentStartPos = 13; ContentEndPos = 16 }])
+        let expected = Object { StartPos = 2
+                                EndPos = 19
+                                Fields = dict ["a", RawNumber { ContentStartPos = 13; ContentEndPos = 16 }] }
         let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 2
         Assert.AreEqual(19, pos)
         Assert.AreEqual(expected, raw)
 
         // Object with two fields.
         let bytes = Encoding.UTF8.GetBytes """{"a":1,"b":""}"""
-        let expected = Object (dict ["a", RawNumber { ContentStartPos = 5; ContentEndPos = 6 }
-                                     "b", RawString { ContentStartPos = 12; ContentEndPos = 12; StringLength = 0 } ])
+        let expected =
+            Object { StartPos = 0
+                     EndPos = 14
+                     Fields = dict ["a", RawNumber { ContentStartPos = 5; ContentEndPos = 6 }
+                                    "b", RawString { ContentStartPos = 12; ContentEndPos = 12; StringLength = 0 } ] }
         let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 2
         Assert.AreEqual(14, pos)
         Assert.AreEqual(expected, raw)
         let bytes = Encoding.UTF8.GetBytes """  {  "a"  :  1  ,  "b"  :  ""  }  """
-        let expected = Object (dict ["a", RawNumber { ContentStartPos = 13; ContentEndPos = 14 }
-                                     "b", RawString { ContentStartPos = 28; ContentEndPos = 28; StringLength = 0 } ])
+        let expected =
+            Object { StartPos = 2
+                     EndPos = 32
+                     Fields = dict ["a", RawNumber { ContentStartPos = 13; ContentEndPos = 14 }
+                                    "b", RawString { ContentStartPos = 28; ContentEndPos = 28; StringLength = 0 } ] }
         let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 2
         Assert.AreEqual(32, pos)
         Assert.AreEqual(expected, raw)
@@ -707,37 +737,46 @@ module BasicValue =
     let ``spacing in arrays`` () =
         // Empty array.
         let bytes = Encoding.UTF8.GetBytes "[]"
-        let expected = Array [||]
+        let expected = Array { StartPos = 0; EndPos = 2; Items = [||] }
         let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(2, pos)
         Assert.AreEqual(expected, raw)
         let bytes = Encoding.UTF8.GetBytes "  [  ]  "
+        let expected = Array { StartPos = 2; EndPos = 6; Items = [||] }
         let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(6, pos)
         Assert.AreEqual(expected, raw)
 
         // Array with one item.
         let bytes = Encoding.UTF8.GetBytes "[-1]"
-        let expected = Array [| RawNumber { ContentStartPos = 1; ContentEndPos = 3 } |]
+        let expected = Array { StartPos = 0
+                               EndPos = 4
+                               Items = [| RawNumber { ContentStartPos = 1; ContentEndPos = 3 } |] }
         let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 2
         Assert.AreEqual(4, pos)
         Assert.AreEqual(expected, raw)
         let bytes = Encoding.UTF8.GetBytes "  [  -1  ]  "
-        let expected = Array [| RawNumber { ContentStartPos = 5; ContentEndPos = 7 } |]
+        let expected = Array { StartPos = 2
+                               EndPos = 10
+                               Items = [| RawNumber { ContentStartPos = 5; ContentEndPos = 7 } |] }
         let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 2
         Assert.AreEqual(10, pos)
         Assert.AreEqual(expected, raw)
 
         // Array with two items.
         let bytes = Encoding.UTF8.GetBytes "[-1,-3]"
-        let expected = Array [| RawNumber { ContentStartPos = 1; ContentEndPos = 3 }
-                                RawNumber { ContentStartPos = 4; ContentEndPos = 6 } |]
+        let expected = Array { StartPos = 0
+                               EndPos = 7
+                               Items = [| RawNumber { ContentStartPos = 1; ContentEndPos = 3 }
+                                          RawNumber { ContentStartPos = 4; ContentEndPos = 6 } |] }
         let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 2
         Assert.AreEqual(7, pos)
         Assert.AreEqual(expected, raw)
         let bytes = Encoding.UTF8.GetBytes "  [  -1  ,  -3  ]  "
-        let expected = Array [| RawNumber { ContentStartPos = 5; ContentEndPos = 7 }
-                                RawNumber { ContentStartPos = 12; ContentEndPos = 14 } |]
+        let expected = Array { StartPos = 2
+                               EndPos = 17
+                               Items = [| RawNumber { ContentStartPos = 5; ContentEndPos = 7 }
+                                          RawNumber { ContentStartPos = 12; ContentEndPos = 14 } |] }
         let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 2
         Assert.AreEqual(17, pos)
         Assert.AreEqual(expected, raw)
@@ -831,14 +870,16 @@ module BasicValue =
             RawNumber { ContentStartPos = 0; ContentEndPos = 1 }  // 0
             RawNumber { ContentStartPos = 1; ContentEndPos = 2 }  // 0
             RawNumber { ContentStartPos = 2; ContentEndPos = 5 }  // 1e2
-            Object (dict [ "x", RawNumber { ContentStartPos = 10; ContentEndPos = 13 } ])  // {"x":1.2}
+            Object { StartPos = 5
+                     EndPos = 14
+                     Fields = dict [ "x", RawNumber { ContentStartPos = 10; ContentEndPos = 13 } ] }  // {"x":1.2}
             Null
             True
             RawNumber { ContentStartPos = 22; ContentEndPos = 30 }  // 133.6e-5
             False
             RawString { ContentStartPos = 36; ContentEndPos = 41; StringLength = 5 }  // "hello"
-            Array [||]
-            Object (dict [])
+            Array { StartPos = 44; EndPos = 46; Items = [||] }
+            Object { StartPos = 46; EndPos = 48; Fields = dict [] }
         ]
         let actual = ResizeArray()
 
@@ -856,12 +897,12 @@ module BasicValue =
         let bytes = Encoding.UTF8.GetBytes "{}garbage"
         let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(2, pos)
-        Assert.AreEqual(Object (dict []), raw)
+        Assert.AreEqual(Object { StartPos = 0; EndPos = 2; Fields = dict [] }, raw)
 
         let bytes = Encoding.UTF8.GetBytes "[]garbage"
         let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
         Assert.AreEqual(2, pos)
-        Assert.AreEqual(Array [||], raw)
+        Assert.AreEqual(Array { StartPos = 0; EndPos = 2; Items = [||] }, raw)
 
         let bytes = Encoding.UTF8.GetBytes "\"hi\"garbage"
         let struct (raw, pos) = parseRawValue (ReadOnlySpan bytes) 0 1
