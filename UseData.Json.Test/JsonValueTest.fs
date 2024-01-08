@@ -57,6 +57,36 @@ let ``parse array of decimals`` () =
         res)
 
 [<Test>]
+let ``parse tuples`` () =
+    let json = Encoding.UTF8.GetBytes """
+        [
+            [],
+            ["a"],
+            ["a", 1],
+            ["a", 1, true],
+            ["a", 1, true, 3.14],
+            ["a", 1, true, 3.14, {}]
+        ]
+    """
+    let expected =
+        (),
+        "a",
+        ("a", 1),
+        ("a", 1, true),
+        ("a", 1, true, 3.14m),
+        ("a", 1, true, 3.14m, ())
+    let res = JsonValue.parseWhole failTestOnUnusedFieldTracer (Memory json) maxNesting (fun v ->
+        v
+        |> Json.tuple6
+            Json.tuple0
+            (Json.tuple1 Json.string)
+            (Json.tuple2 Json.string Json.int)
+            (Json.tuple3 Json.string Json.int Json.bool)
+            (Json.tuple4 Json.string Json.int Json.bool Json.decimal)
+            (Json.tuple5 Json.string Json.int Json.bool Json.decimal (fun _ -> ())))
+    Assert.AreEqual(expected, res)
+
+[<Test>]
 let ``parse date time offsets`` () =
     let json = Encoding.UTF8.GetBytes """
         [
@@ -172,6 +202,44 @@ let ``parse remaining fields to dictionary`` () =
     Assert.AreEqual(1, res.A)
     Assert.AreEqual(true, res.D)
     CollectionAssert.AreEquivalent(dict ["b", "foo"; "c", "bar"], res.Rest)
+
+[<Test>]
+let ``parse array where items have different types`` () =
+    let json = Encoding.UTF8.GetBytes """
+        [
+            1,
+            true,
+            ["foo"],
+            { "x": 1.1, "y": 2.2 }
+        ]
+    """
+    let expected = 1, true, [| "foo" |], {| X = 1.1m; Y = 2.2m |}
+    let resIter = JsonValue.parseWhole failTestOnUnusedFieldTracer (Memory json) maxNesting (fun v ->
+        let mutable i = 0
+        let mutable item0 = Unchecked.defaultof<_>
+        let mutable item1 = Unchecked.defaultof<_>
+        let mutable item2 = Unchecked.defaultof<_>
+        let mutable item3 = Unchecked.defaultof<_>
+        v
+        |> Json.iter (fun v ->
+            match i with
+            | 0 -> item0 <- v |> Json.int
+            | 1 -> item1 <- v |> Json.bool
+            | 2 -> item2 <- v |> Json.map Json.string
+            | 3 -> item3 <- {| X = v |> Json.field "x" Json.decimal
+                               Y = v |> Json.field "y" Json.decimal |}
+            | _ -> failwith "Too many items"
+            i <- i + 1)
+        if i <> 4 then
+            failwith $"Not enough items: %d{i}"
+        item0, item1, item2, item3)
+    let resTuple = JsonValue.parseWhole failTestOnUnusedFieldTracer (Memory json) maxNesting (fun v ->
+        v
+        |> Json.tuple4 Json.int Json.bool (Json.map Json.string)
+            (fun v -> {| X = v |> Json.field "x" Json.decimal
+                         Y = v |> Json.field "y" Json.decimal |}))
+    Assert.AreEqual(expected, resIter)
+    Assert.AreEqual(expected, resTuple)
 
 [<Test>]
 let ``fails when required field is missing`` () =

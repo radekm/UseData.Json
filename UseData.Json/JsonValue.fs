@@ -182,6 +182,159 @@ module Json =
                 f v)
         | _ -> raiseJsonParsingException v Error.UnexpectedKind "Expected array"
 
+    let tuple6
+        (f0 : JsonValue -> 'T0)
+        (f1 : JsonValue -> 'T1)
+        (f2 : JsonValue -> 'T2)
+        (f3 : JsonValue -> 'T3)
+        (f4 : JsonValue -> 'T4)
+        (f5 : JsonValue -> 'T5)
+        (v : JsonValue) : 'T0 * 'T1 * 'T2 * 'T3 * 'T4 * 'T5 =
+
+        match v.Raw with
+        | Array { Items = [| raw0; raw1; raw2; raw3; raw4; raw5 |] } ->
+            if v.Used then
+                raiseJsonParsingException v Error.ValueAlreadyUsed "Array already used"
+            v.Used <- true
+            let x0 =
+                use v = new JsonValue(ArrayItem (v.Which, 0), v.Tracer, v.Buffer, raw0)
+                f0 v
+            let x1 =
+                use v = new JsonValue(ArrayItem (v.Which, 1), v.Tracer, v.Buffer, raw1)
+                f1 v
+            let x2 =
+                use v = new JsonValue(ArrayItem (v.Which, 2), v.Tracer, v.Buffer, raw2)
+                f2 v
+            let x3 =
+                use v = new JsonValue(ArrayItem (v.Which, 3), v.Tracer, v.Buffer, raw3)
+                f3 v
+            let x4 =
+                use v = new JsonValue(ArrayItem (v.Which, 4), v.Tracer, v.Buffer, raw4)
+                f4 v
+            let x5 =
+                use v = new JsonValue(ArrayItem (v.Which, 5), v.Tracer, v.Buffer, raw5)
+                f5 v
+            x0, x1, x2, x3, x4, x5
+        | _ -> raiseJsonParsingException v Error.UnexpectedKind "Expected array with 6 items"
+
+    let tuple5
+        (f0 : JsonValue -> 'T0)
+        (f1 : JsonValue -> 'T1)
+        (f2 : JsonValue -> 'T2)
+        (f3 : JsonValue -> 'T3)
+        (f4 : JsonValue -> 'T4)
+        (v : JsonValue) : 'T0 * 'T1 * 'T2 * 'T3 * 'T4 =
+
+        match v.Raw with
+        | Array { Items = [| raw0; raw1; raw2; raw3; raw4 |] } ->
+            if v.Used then
+                raiseJsonParsingException v Error.ValueAlreadyUsed "Array already used"
+            v.Used <- true
+            let x0 =
+                use v = new JsonValue(ArrayItem (v.Which, 0), v.Tracer, v.Buffer, raw0)
+                f0 v
+            let x1 =
+                use v = new JsonValue(ArrayItem (v.Which, 1), v.Tracer, v.Buffer, raw1)
+                f1 v
+            let x2 =
+                use v = new JsonValue(ArrayItem (v.Which, 2), v.Tracer, v.Buffer, raw2)
+                f2 v
+            let x3 =
+                use v = new JsonValue(ArrayItem (v.Which, 3), v.Tracer, v.Buffer, raw3)
+                f3 v
+            let x4 =
+                use v = new JsonValue(ArrayItem (v.Which, 4), v.Tracer, v.Buffer, raw4)
+                f4 v
+            x0, x1, x2, x3, x4
+        | _ -> raiseJsonParsingException v Error.UnexpectedKind "Expected array with 5 items"
+
+    let tuple4
+        (f0 : JsonValue -> 'T0)
+        (f1 : JsonValue -> 'T1)
+        (f2 : JsonValue -> 'T2)
+        (f3 : JsonValue -> 'T3)
+        (v : JsonValue) : 'T0 * 'T1 * 'T2 * 'T3 =
+
+        match v.Raw with
+        | Array { Items = [| raw0; raw1; raw2; raw3 |] } ->
+            if v.Used then
+                raiseJsonParsingException v Error.ValueAlreadyUsed "Array already used"
+            v.Used <- true
+            let x0 =
+                use v = new JsonValue(ArrayItem (v.Which, 0), v.Tracer, v.Buffer, raw0)
+                f0 v
+            let x1 =
+                use v = new JsonValue(ArrayItem (v.Which, 1), v.Tracer, v.Buffer, raw1)
+                f1 v
+            let x2 =
+                use v = new JsonValue(ArrayItem (v.Which, 2), v.Tracer, v.Buffer, raw2)
+                f2 v
+            let x3 =
+                use v = new JsonValue(ArrayItem (v.Which, 3), v.Tracer, v.Buffer, raw3)
+                f3 v
+            x0, x1, x2, x3
+        | _ -> raiseJsonParsingException v Error.UnexpectedKind "Expected array with 4 items"
+
+    let tuple3
+        (f0 : JsonValue -> 'T0)
+        (f1 : JsonValue -> 'T1)
+        (f2 : JsonValue -> 'T2)
+        (v : JsonValue) : 'T0 * 'T1 * 'T2 =
+
+        match v.Raw with
+        | Array { Items = [| raw0; raw1; raw2 |] } ->
+            if v.Used then
+                raiseJsonParsingException v Error.ValueAlreadyUsed "Array already used"
+            v.Used <- true
+            let x0 =
+                use v = new JsonValue(ArrayItem (v.Which, 0), v.Tracer, v.Buffer, raw0)
+                f0 v
+            let x1 =
+                use v = new JsonValue(ArrayItem (v.Which, 1), v.Tracer, v.Buffer, raw1)
+                f1 v
+            let x2 =
+                use v = new JsonValue(ArrayItem (v.Which, 2), v.Tracer, v.Buffer, raw2)
+                f2 v
+            x0, x1, x2
+        | _ -> raiseJsonParsingException v Error.UnexpectedKind "Expected array with 3 items"
+
+    let tuple2
+        (f0 : JsonValue -> 'T0)
+        (f1 : JsonValue -> 'T1)
+        (v : JsonValue) : 'T0 * 'T1 =
+
+        match v.Raw with
+        | Array { Items = [| raw0; raw1 |] } ->
+            if v.Used then
+                raiseJsonParsingException v Error.ValueAlreadyUsed "Array already used"
+            v.Used <- true
+            let x0 =
+                use v = new JsonValue(ArrayItem (v.Which, 0), v.Tracer, v.Buffer, raw0)
+                f0 v
+            let x1 =
+                use v = new JsonValue(ArrayItem (v.Which, 1), v.Tracer, v.Buffer, raw1)
+                f1 v
+            x0, x1
+        | _ -> raiseJsonParsingException v Error.UnexpectedKind "Expected array with 2 items"
+
+    let tuple1 (f : JsonValue -> 'T) (v : JsonValue) : 'T =
+        match v.Raw with
+        | Array { Items = [| raw |] } ->
+            if v.Used then
+                raiseJsonParsingException v Error.ValueAlreadyUsed "Array already used"
+            v.Used <- true
+            use v = new JsonValue(ArrayItem (v.Which, 0), v.Tracer, v.Buffer, raw)
+            f v
+        | _ -> raiseJsonParsingException v Error.UnexpectedKind "Expected array with 1 item"
+
+    let tuple0 (v : JsonValue) : unit =
+        match v.Raw with
+        | Array { Items = [||] } ->
+            if v.Used then
+                raiseJsonParsingException v Error.ValueAlreadyUsed "Array already used"
+            v.Used <- true
+        | _ -> raiseJsonParsingException v Error.UnexpectedKind "Expected empty array"
+
     let string (v : JsonValue) : string =
         match v.Raw with
         | RawString raw ->
